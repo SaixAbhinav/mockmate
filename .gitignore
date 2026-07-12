@@ -1,0 +1,35 @@
+# --- AI-assistant context (for Claude, not for users of this repo) ---
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+AGENTS.md
+CONTEXT.md
+*.plan.md
+docs/ai-context/
+memory/
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+client_secret*.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+*.local
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

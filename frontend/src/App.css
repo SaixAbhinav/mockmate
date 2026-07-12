@@ -1,0 +1,63 @@
+.wrap {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+  text-align: left;
+}
+
+.tagline {
+  color: #888;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.status {
+  font-size: 0.9rem;
+  color: #888;
+}
+
+.status-listening { color: #d43; }
+.status-thinking { color: #b80; }
+.status-speaking { color: #283; }
+
+.latency {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.fallback {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.fallback input {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #555;
+  background: transparent;
+  color: inherit;
+}
+
+.error {
+  color: #d43;
+}
+
+.transcript p {
+  line-height: 1.6;
+}
+
+.transcript .assistant {
+  color: #7ab;
+}
+
+.hint {
+  color: #888;
+  font-style: italic;
+}
