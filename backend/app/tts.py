@@ -12,7 +12,7 @@ VOICES = {
     "en-AU-WilliamNeural": "William — Australian, male",
 }
 
-DEFAULT_VOICE = "en-IN-NeerjaNeural"
+DEFAULT_VOICE = "en-AU-WilliamNeural"
 
 
 async def synthesize(text: str, voice: str = DEFAULT_VOICE) -> bytes:
