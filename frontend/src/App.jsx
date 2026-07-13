@@ -107,13 +107,6 @@ function App() {
       <header className="topbar">
         <h1>MockMate</h1>
         <div className="controls">
-          {status === 'recording' ? (
-            <button className="recording" onClick={stopRecording}>⏹ Stop &amp; send</button>
-          ) : (
-            <button onClick={startRecording} disabled={status !== 'idle'}>
-              🎤 Answer by voice
-            </button>
-          )}
           <label className="voice-row">
             Voice:
             <select value={voice} onChange={(e) => setVoice(e.target.value)}>
@@ -155,6 +148,20 @@ function App() {
           <button type="submit" disabled={status === 'thinking' || !draft.trim()}>
             Send
           </button>
+          {status === 'recording' ? (
+            <button type="button" className="recording" onClick={stopRecording}>
+              ⏹ Stop
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={startRecording}
+              disabled={status !== 'idle'}
+              aria-label="Answer by voice"
+            >
+              🎤
+            </button>
+          )}
         </form>
       </section>
 
