@@ -30,6 +30,32 @@
   color: #888;
 }
 
+button.recording {
+  background: #d43;
+  color: white;
+}
+
+.voice-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #888;
+  margin-bottom: 1rem;
+}
+
+.voice-row select {
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: transparent;
+  color: inherit;
+}
+
+.voice-row select option {
+  color: #222;
+}
+
 .fallback {
   display: flex;
   gap: 0.5rem;

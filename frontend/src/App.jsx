@@ -1,16 +1,25 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
-
-// Browser STT (ADR 0004): free, zero infra. Chrome/Edge expose it as webkit-prefixed.
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
 
 function App() {
   const [history, setHistory] = useState([])
-  const [status, setStatus] = useState('idle') // idle | listening | thinking | speaking
+  const [status, setStatus] = useState('idle') // idle | recording | transcribing | thinking | speaking
   const [draft, setDraft] = useState('')
   const [latencyMs, setLatencyMs] = useState(null)
   const [error, setError] = useState(null)
-  const recognitionRef = useRef(null)
+  const [voices, setVoices] = useState({})
+  const [voice, setVoice] = useState('')
+  const recorderRef = useRef(null)
+
+  useEffect(() => {
+    fetch('/api/voices')
+      .then((r) => r.json())
+      .then((data) => {
+        setVoices(data.voices)
+        setVoice(data.default)
+      })
+      .catch(() => setError('backend not reachable — is it running on port 8000?'))
+  }, [])
 
   async function sendTranscript(transcript) {
     const text = transcript.trim()
@@ -24,7 +33,7 @@ function App() {
       const resp = await fetch('/api/turn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ history: newHistory }),
+        body: JSON.stringify({ history: newHistory, voice }),
       })
       if (!resp.ok) throw new Error(`backend returned ${resp.status}`)
       const data = await resp.json()
@@ -41,23 +50,44 @@ function App() {
     }
   }
 
-  function startListening() {
-    if (!SpeechRecognition) {
-      setError('This browser has no speech recognition — use the text box below.')
+  async function startRecording() {
+    setError(null)
+    let stream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch {
+      setError('Microphone permission denied — allow it in the address bar, or type below.')
       return
     }
-    const rec = new SpeechRecognition()
-    recognitionRef.current = rec
-    rec.lang = 'en-IN'
-    rec.interimResults = false
-    rec.onresult = (e) => sendTranscript(e.results[0][0].transcript)
-    rec.onerror = (e) => {
-      setError(`speech recognition error: ${e.error}`)
-      setStatus('idle')
+    const recorder = new MediaRecorder(stream)
+    const chunks = []
+    recorder.ondataavailable = (e) => chunks.push(e.data)
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop())
+      setStatus('transcribing')
+      try {
+        const blob = new Blob(chunks, { type: recorder.mimeType })
+        const form = new FormData()
+        form.append('file', blob, 'answer.webm')
+        const resp = await fetch('/api/transcribe', { method: 'POST', body: form })
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => ({}))
+          throw new Error(body.detail || `transcription failed (${resp.status})`)
+        }
+        const data = await resp.json()
+        await sendTranscript(data.transcript)
+      } catch (err) {
+        setError(String(err))
+        setStatus('idle')
+      }
     }
-    rec.onend = () => setStatus((s) => (s === 'listening' ? 'idle' : s))
-    setStatus('listening')
-    rec.start()
+    recorderRef.current = recorder
+    recorder.start()
+    setStatus('recording')
+  }
+
+  function stopRecording() {
+    recorderRef.current?.stop()
   }
 
   function handleTextSubmit(e) {
@@ -72,12 +102,25 @@ function App() {
       <p className="tagline">Walking skeleton — one spoken interview turn, end to end.</p>
 
       <div className="controls">
-        <button onClick={startListening} disabled={status !== 'idle'}>
-          {status === 'listening' ? 'Listening…' : '🎤 Answer by voice'}
-        </button>
+        {status === 'recording' ? (
+          <button className="recording" onClick={stopRecording}>⏹ Stop &amp; send</button>
+        ) : (
+          <button onClick={startRecording} disabled={status !== 'idle'}>
+            🎤 Answer by voice
+          </button>
+        )}
         <span className={`status status-${status}`}>{status}</span>
         {latencyMs !== null && <span className="latency">last turn: {latencyMs} ms</span>}
       </div>
+
+      <label className="voice-row">
+        Interviewer voice:
+        <select value={voice} onChange={(e) => setVoice(e.target.value)}>
+          {Object.entries(voices).map(([id, label]) => (
+            <option key={id} value={id}>{label}</option>
+          ))}
+        </select>
+      </label>
 
       <form onSubmit={handleTextSubmit} className="fallback">
         <input

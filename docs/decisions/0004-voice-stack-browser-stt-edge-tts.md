@@ -1,6 +1,6 @@
 # ADR 0004: Voice stack — browser Web Speech API (STT) + Edge-TTS (output)
 
-Date: 2026-07-12 · Status: accepted
+Date: 2026-07-12 · Status: amended (see bottom)
 
 ## Context
 
@@ -29,3 +29,17 @@ swap small.
 - $0, no keys, ships in the walking skeleton.
 - Chrome/Edge requirement for voice input (text fallback provided).
 - TTS requires network (Edge-TTS calls Microsoft's service).
+
+## Amendment (2026-07-12, same day)
+
+Browser STT failed in first real use: the Web Speech API silently depends on
+the browser vendor's cloud speech service and returned opaque "network"
+errors on the owner's machine. Replaced with **server-side STT**: the browser
+records audio with MediaRecorder and uploads it to `/api/transcribe`, which
+calls **Groq's free-tier Whisper** (`whisper-large-v3-turbo`) — the same key
+that powers the LLM. Works in every browser; text box remains the no-key
+fallback. faster-whisper (local) stays the offline upgrade path.
+
+TTS voice also became user-selectable from an allowlist (`/api/voices`)
+after the default Indian-English voice didn't suit the owner's taste —
+hardcoded voice choices don't survive contact with users.
