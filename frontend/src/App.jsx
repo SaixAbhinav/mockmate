@@ -10,6 +10,7 @@ function App() {
   const [voices, setVoices] = useState({})
   const [voice, setVoice] = useState('')
   const recorderRef = useRef(null)
+  const chatEndRef = useRef(null)
 
   useEffect(() => {
     fetch('/api/voices')
@@ -20,6 +21,11 @@ function App() {
       })
       .catch(() => setError('backend not reachable — is it running on port 8000?'))
   }, [])
+
+  // Keep the newest message in view, chat-app style (wireframe v1).
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [history, status])
 
   async function sendTranscript(transcript) {
     const text = transcript.trim()
@@ -98,56 +104,61 @@ function App() {
 
   return (
     <main className="wrap">
-      <h1>MockMate</h1>
-      <p className="tagline">Walking skeleton — one spoken interview turn, end to end.</p>
+      <header className="topbar">
+        <h1>MockMate</h1>
+        <div className="controls">
+          {status === 'recording' ? (
+            <button className="recording" onClick={stopRecording}>⏹ Stop &amp; send</button>
+          ) : (
+            <button onClick={startRecording} disabled={status !== 'idle'}>
+              🎤 Answer by voice
+            </button>
+          )}
+          <label className="voice-row">
+            Voice:
+            <select value={voice} onChange={(e) => setVoice(e.target.value)}>
+              {Object.entries(voices).map(([id, label]) => (
+                <option key={id} value={id}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <span className={`status status-${status}`}>{status}</span>
+          {latencyMs !== null && <span className="latency">last turn: {latencyMs} ms</span>}
+        </div>
+      </header>
 
-      <div className="controls">
-        {status === 'recording' ? (
-          <button className="recording" onClick={stopRecording}>⏹ Stop &amp; send</button>
-        ) : (
-          <button onClick={startRecording} disabled={status !== 'idle'}>
-            🎤 Answer by voice
-          </button>
-        )}
-        <span className={`status status-${status}`}>{status}</span>
-        {latencyMs !== null && <span className="latency">last turn: {latencyMs} ms</span>}
-      </div>
-
-      <label className="voice-row">
-        Interviewer voice:
-        <select value={voice} onChange={(e) => setVoice(e.target.value)}>
-          {Object.entries(voices).map(([id, label]) => (
-            <option key={id} value={id}>{label}</option>
+      <section className="chat">
+        <div className="messages">
+          {history.length === 0 && (
+            <p className="hint">
+              Press the mic (or type below) to start — the interviewer replies out loud.
+            </p>
+          )}
+          {history.map((m, i) => (
+            <p key={i} className={m.role}>
+              <strong>{m.role === 'user' ? 'You' : 'Interviewer'}:</strong> {m.content}
+            </p>
           ))}
-        </select>
-      </label>
+          {(status === 'thinking' || status === 'transcribing') && (
+            <p className="hint">{status}…</p>
+          )}
+          <div ref={chatEndRef} />
+        </div>
 
-      <form onSubmit={handleTextSubmit} className="fallback">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="No mic? Type your answer here"
-          disabled={status === 'thinking'}
-        />
-        <button type="submit" disabled={status === 'thinking' || !draft.trim()}>
-          Send
-        </button>
-      </form>
+        <form onSubmit={handleTextSubmit} className="composer">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Type here"
+            disabled={status === 'thinking'}
+          />
+          <button type="submit" disabled={status === 'thinking' || !draft.trim()}>
+            Send
+          </button>
+        </form>
+      </section>
 
       {error && <p className="error">{error}</p>}
-
-      <section className="transcript">
-        {history.length === 0 && (
-          <p className="hint">
-            Press the mic (or type) to start — the interviewer replies out loud.
-          </p>
-        )}
-        {history.map((m, i) => (
-          <p key={i} className={m.role}>
-            <strong>{m.role === 'user' ? 'You' : 'Interviewer'}:</strong> {m.content}
-          </p>
-        ))}
-      </section>
     </main>
   )
 }
