@@ -6,8 +6,10 @@ interview-prep SaaS" genre, rebuilt as an open, self-hostable app.
 Speak your answers; an AI interviewer asks questions, probes follow-ups, and
 (soon) scores you against rubrics and targets your weak areas.
 
-**Status: walking skeleton.** One spoken Q&A turn works end to end:
-browser mic → speech-to-text → LLM interviewer → neural TTS reply.
+**Status: interviewer agent.** A full mock interview runs end to end: pick a
+domain, work through a real question plan (ADR 0006), get probed or
+clarified on shallow/off-topic answers, and reach a wrap-up — voice in
+(MediaRecorder → server-side Groq Whisper), voice out (neural TTS).
 
 ## Run it
 
@@ -29,14 +31,26 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 in Chrome or Edge (voice input needs their speech
-recognition; other browsers can use the text box).
+Open http://localhost:5173 — works in any browser (speech-to-text is
+server-side now, not the browser's own speech API); the text box is always
+available as a fallback.
 
 ## LLM setup (optional)
 
-With no API key the app runs a scripted demo interviewer. For a real one,
-copy `backend/.env.example` to `backend/.env` and add a free-tier key from
+With no API key the app runs a scripted demo interviewer (walks the question
+queue, never probes). For a real one, copy `backend/.env.example` to
+`backend/.env` and add a free-tier key from
 [Groq](https://console.groq.com) or [Google AI Studio](https://aistudio.google.com).
+The same `GROQ_API_KEY` also powers voice transcription (Whisper); without it,
+voice input is unavailable and the text box is the only way to answer.
+
+## Tests
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest
+```
 
 ## Design decisions
 
@@ -45,6 +59,7 @@ as a short ADR — context, options, choice, consequences.
 
 ## Dependencies
 
-Backend: FastAPI, uvicorn, edge-tts, httpx, python-dotenv (pinned in
-`backend/requirements.txt`). Frontend: React via Vite. Coming later (flagged
-in advance per repo rules): LangGraph, Chroma, sentence-transformers.
+Backend: FastAPI, uvicorn, edge-tts, httpx, python-dotenv, pyyaml, langgraph,
+langchain-core (pinned in `backend/requirements.txt`); pytest, anyio for
+tests (`backend/requirements-dev.txt`). Frontend: React via Vite. Coming
+later (flagged in advance per repo rules): Chroma, sentence-transformers.
