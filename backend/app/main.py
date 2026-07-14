@@ -1,20 +1,22 @@
-"""MockMate walking skeleton: one spoken interview turn, end to end.
+"""MockMate interviewer agent API (Day 2, ADR 0006/0007).
 
-POST /api/transcribe  (audio file)                -> {transcript: str}
-POST /api/turn  {history: [...], voice?: str}     -> {reply, audio_b64, provider}
+POST /api/session                    -> starts a Session, returns Q1
+POST /api/transcribe   (audio file)  -> {transcript}
+POST /api/session/{id}/answer        -> judges the answer, advances the Session
 
-Deliberately no agents, no RAG, no persistence yet — this exists to prove the
-voice loop (mic -> STT -> LLM -> TTS audio back) is fast enough to feel like
-a conversation before anything bigger is built on top of it.
+Session state lives in an in-memory dict (ADR 0007): fine for anonymous,
+single-process demo traffic; orphaned sessions are known, deferred debt.
 """
 
 import base64
+import uuid
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from .agent import InterviewState, start_session, submit_answer, build_graph
 from .providers import get_provider
 from .stt import SttUnavailableError, transcribe
 from .tts import DEFAULT_VOICE, VOICES, synthesize
@@ -30,21 +32,48 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+SUPPORTED_DOMAINS = {"ml_genai"}
 
-class Message(BaseModel):
-    role: str
-    content: str
+_sessions: dict[str, InterviewState] = {}
 
 
-class TurnRequest(BaseModel):
-    history: list[Message]
+class CreateSessionRequest(BaseModel):
+    domain: str
     voice: str = DEFAULT_VOICE
 
 
-class TurnResponse(BaseModel):
+class CreateSessionResponse(BaseModel):
+    session_id: str
+    first_question: str
+    audio_b64: str
+    question_number: int
+    total_questions: int
+
+
+class AnswerRequest(BaseModel):
+    transcript: str
+    voice: str = DEFAULT_VOICE
+
+
+class AnswerResponse(BaseModel):
     reply: str
     audio_b64: str
-    provider: str
+    phase: str
+    question_number: int
+    total_questions: int
+
+
+def _progress(state: InterviewState) -> tuple[int, int]:
+    in_progress = 0 if state["phase"] == "done" else 1
+    total = len(state["completed"]) + len(state["queue"]) + in_progress
+    number = len(state["completed"]) + in_progress
+    return number, total
+
+
+def _external_phase(state: InterviewState) -> str:
+    # "asking" is an internal detail of having just moved to a new question;
+    # the API surfaces it as "advancing" per the answer-endpoint contract.
+    return "advancing" if state["phase"] == "asking" else state["phase"]
 
 
 @app.get("/api/health")
@@ -71,13 +100,42 @@ async def transcribe_audio(file: UploadFile):
     return {"transcript": text}
 
 
-@app.post("/api/turn", response_model=TurnResponse)
-async def turn(req: TurnRequest) -> TurnResponse:
-    provider = get_provider()
-    reply = await provider.chat([m.model_dump() for m in req.history])
-    audio = await synthesize(reply, req.voice)
-    return TurnResponse(
-        reply=reply,
+@app.post("/api/session", response_model=CreateSessionResponse)
+async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
+    if req.domain not in SUPPORTED_DOMAINS:
+        raise HTTPException(status_code=400, detail=f"unsupported domain {req.domain!r}")
+
+    session_id = str(uuid.uuid4())
+    state = start_session(session_id, req.domain)
+    _sessions[session_id] = state
+
+    audio = await synthesize(state["current_question"]["question"], req.voice)
+    number, total = _progress(state)
+    return CreateSessionResponse(
+        session_id=session_id,
+        first_question=state["current_question"]["question"],
         audio_b64=base64.b64encode(audio).decode(),
-        provider=provider.name,
+        question_number=number,
+        total_questions=total,
+    )
+
+
+@app.post("/api/session/{session_id}/answer", response_model=AnswerResponse)
+async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
+    state = _sessions.get(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="unknown session")
+
+    graph = build_graph(get_provider())
+    state = await submit_answer(graph, state, req.transcript)
+    _sessions[session_id] = state
+
+    audio = await synthesize(state["reply"], req.voice)
+    number, total = _progress(state)
+    return AnswerResponse(
+        reply=state["reply"],
+        audio_b64=base64.b64encode(audio).decode(),
+        phase=_external_phase(state),
+        question_number=number,
+        total_questions=total,
     )

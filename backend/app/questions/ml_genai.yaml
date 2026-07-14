@@ -1,0 +1,131 @@
+# ML/GenAI question bank (ADR 0003 schema, ADR 0008).
+# difficulty: easy | medium | hard. follow_up_hints ground the LLM's probe/clarify
+# follow-ups (ADR 0006) — they are not asked verbatim.
+
+- domain: ml_genai
+  topic: fundamentals
+  difficulty: easy
+  question: "Tell me a little about yourself and what you're preparing for."
+  follow_up_hints:
+    - "Ask what drew them to ML/GenAI specifically"
+    - "Ask about a recent project they're proud of"
+
+- domain: ml_genai
+  topic: bias-variance
+  difficulty: easy
+  question: "What is overfitting, and how would you detect it?"
+  follow_up_hints:
+    - "Ask about train vs validation loss curves"
+    - "Ask what regularization techniques they'd reach for"
+
+- domain: ml_genai
+  topic: evaluation
+  difficulty: easy
+  question: "What's the difference between precision and recall, and when would you optimize for one over the other?"
+  follow_up_hints:
+    - "Ask for a concrete example (e.g. spam filter vs cancer screening)"
+    - "Ask about F1 score as a compromise metric"
+
+- domain: ml_genai
+  topic: fundamentals
+  difficulty: easy
+  question: "Explain the difference between supervised, unsupervised, and reinforcement learning."
+  follow_up_hints:
+    - "Ask for one real example of each"
+    - "Ask how you'd tell which paradigm fits a new problem"
+
+- domain: ml_genai
+  topic: neural-networks
+  difficulty: easy
+  question: "What does a loss function do, and why can't we just optimize accuracy directly?"
+  follow_up_hints:
+    - "Ask why accuracy isn't differentiable"
+    - "Ask for an example loss function (cross-entropy, MSE)"
+
+- domain: ml_genai
+  topic: transformers
+  difficulty: medium
+  question: "At a high level, what problem does the attention mechanism solve that RNNs struggled with?"
+  follow_up_hints:
+    - "Ask about long-range dependencies and vanishing gradients"
+    - "Ask what 'attending to' a token means concretely"
+
+- domain: ml_genai
+  topic: llm-training
+  difficulty: medium
+  question: "What is the difference between pretraining and fine-tuning a language model?"
+  follow_up_hints:
+    - "Ask about data scale differences"
+    - "Ask about instruction tuning or RLHF as a fine-tuning example"
+
+- domain: ml_genai
+  topic: embeddings
+  difficulty: medium
+  question: "What is an embedding, and why do we use cosine similarity to compare them?"
+  follow_up_hints:
+    - "Ask why raw token IDs aren't useful for similarity"
+    - "Ask about a use case: semantic search, RAG retrieval"
+
+- domain: ml_genai
+  topic: optimization
+  difficulty: medium
+  question: "How does the Adam optimizer differ from plain stochastic gradient descent?"
+  follow_up_hints:
+    - "Ask about momentum and adaptive learning rates"
+    - "Ask when you'd still prefer plain SGD"
+
+- domain: ml_genai
+  topic: rag
+  difficulty: medium
+  question: "What is retrieval-augmented generation, and what problem does it solve?"
+  follow_up_hints:
+    - "Ask about hallucination and knowledge cutoff"
+    - "Ask how retrieved context gets into the prompt"
+
+- domain: ml_genai
+  topic: evaluation
+  difficulty: medium
+  question: "How would you evaluate whether a fine-tuned LLM is actually better than the base model?"
+  follow_up_hints:
+    - "Ask about held-out benchmarks vs human eval"
+    - "Ask about regression risk on tasks the base model already handled"
+
+- domain: ml_genai
+  topic: generalization
+  difficulty: medium
+  question: "What is data leakage, and give an example of how it could quietly inflate a model's reported accuracy."
+  follow_up_hints:
+    - "Ask about temporal leakage in time-series splits"
+    - "Ask how they'd audit a pipeline for it"
+
+- domain: ml_genai
+  topic: transformers
+  difficulty: hard
+  question: "Why does self-attention have quadratic cost in sequence length, and what are common ways to mitigate it?"
+  follow_up_hints:
+    - "Ask about the attention matrix size relative to sequence length"
+    - "Ask about sparse attention, sliding windows, or FlashAttention"
+
+- domain: ml_genai
+  topic: llm-training
+  difficulty: hard
+  question: "Walk me through what RLHF does and why it's needed on top of supervised fine-tuning."
+  follow_up_hints:
+    - "Ask about the reward model and preference data"
+    - "Ask about failure modes like reward hacking"
+
+- domain: ml_genai
+  topic: deployment
+  difficulty: hard
+  question: "You fine-tune a model and its offline eval improves, but user complaints go up after deploy. How do you debug that gap?"
+  follow_up_hints:
+    - "Ask about eval-set distribution vs production distribution"
+    - "Ask about monitoring, canarying, and rollback strategy"
+
+- domain: ml_genai
+  topic: embeddings
+  difficulty: hard
+  question: "In a RAG system, retrieval returns technically-relevant but unhelpful chunks. What would you change, and where in the pipeline?"
+  follow_up_hints:
+    - "Ask about chunking strategy and chunk size"
+    - "Ask about re-ranking, hybrid search, or embedding model choice"
