@@ -1,6 +1,11 @@
 # ADR 0004: Voice stack — browser Web Speech API (STT) + Edge-TTS (output)
 
-Date: 2026-07-12 · Status: amended (see bottom)
+Date: 2026-07-12 · Status: amended (see bottom); STT half superseded by ADR 0010
+
+> **Note (2026-07-14):** The STT decision below (browser Web Speech API as the
+> primary path) is superseded by **ADR 0010** — Groq Whisper server-side is now
+> primary, with the browser Web Speech API kept as the no-key fallback. The TTS
+> decision (Edge-TTS, Neerja) and the `en-IN` locale intent still stand.
 
 ## Context
 

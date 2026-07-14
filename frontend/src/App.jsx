@@ -1,8 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
+// Domain picker (ML/GenAI only for v1, ADR 0008).
+const DOMAINS = { ml_genai: 'ML / GenAI' }
+
 function App() {
+  const [screen, setScreen] = useState('domain') // domain | interview
+  const [domain, setDomain] = useState('ml_genai')
+  const [sessionId, setSessionId] = useState(null)
   const [history, setHistory] = useState([])
+  const [phase, setPhase] = useState(null) // null | advancing | probing | clarifying | done
+  const [questionNumber, setQuestionNumber] = useState(null)
+  const [totalQuestions, setTotalQuestions] = useState(null)
   const [status, setStatus] = useState('idle') // idle | recording | transcribing | thinking | speaking
   const [draft, setDraft] = useState('')
   const [latencyMs, setLatencyMs] = useState(null)
@@ -27,28 +36,70 @@ function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [history, status])
 
+  async function playAudio(audioB64) {
+    setStatus('speaking')
+    const audio = new Audio(`data:audio/mp3;base64,${audioB64}`)
+    audio.onended = () => setStatus('idle')
+    await audio.play()
+  }
+
+  async function startInterview() {
+    setError(null)
+    setStatus('thinking')
+    try {
+      const resp = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain, voice }),
+      })
+      if (!resp.ok) throw new Error(`backend returned ${resp.status}`)
+      const data = await resp.json()
+      setSessionId(data.session_id)
+      setHistory([{ role: 'assistant', content: data.first_question }])
+      setQuestionNumber(data.question_number)
+      setTotalQuestions(data.total_questions)
+      setPhase(null)
+      setScreen('interview')
+      await playAudio(data.audio_b64)
+    } catch (err) {
+      setError(String(err))
+      setStatus('idle')
+    }
+  }
+
+  function startNewInterview() {
+    setScreen('domain')
+    setSessionId(null)
+    setHistory([])
+    setPhase(null)
+    setQuestionNumber(null)
+    setTotalQuestions(null)
+    setError(null)
+    setStatus('idle')
+  }
+
   async function sendTranscript(transcript) {
     const text = transcript.trim()
-    if (!text) return
+    if (!text || !sessionId) return
     const newHistory = [...history, { role: 'user', content: text }]
     setHistory(newHistory)
     setStatus('thinking')
     setError(null)
     const t0 = performance.now()
     try {
-      const resp = await fetch('/api/turn', {
+      const resp = await fetch(`/api/session/${sessionId}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ history: newHistory, voice }),
+        body: JSON.stringify({ transcript: text, voice }),
       })
       if (!resp.ok) throw new Error(`backend returned ${resp.status}`)
       const data = await resp.json()
       setLatencyMs(Math.round(performance.now() - t0))
       setHistory([...newHistory, { role: 'assistant', content: data.reply }])
-      setStatus('speaking')
-      const audio = new Audio(`data:audio/mp3;base64,${data.audio_b64}`)
-      audio.onended = () => setStatus('idle')
-      await audio.play()
+      setPhase(data.phase)
+      setQuestionNumber(data.question_number)
+      setTotalQuestions(data.total_questions)
+      await playAudio(data.audio_b64)
     } catch (err) {
       setHistory(history) // roll back the optimistic append so a failed turn leaves no orphan message
       setError(String(err))
@@ -102,6 +153,36 @@ function App() {
     setDraft('')
   }
 
+  if (screen === 'domain') {
+    return (
+      <main className="wrap">
+        <header className="topbar">
+          <h1>MockMate</h1>
+        </header>
+        <section className="domain-picker">
+          <label className="voice-row">
+            Domain:
+            <select value={domain} onChange={(e) => setDomain(e.target.value)}>
+              {Object.entries(DOMAINS).map(([id, label]) => (
+                <option key={id} value={id}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <button onClick={startInterview} disabled={status === 'thinking'}>
+            {status === 'thinking' ? 'Starting…' : 'Start interview'}
+          </button>
+        </section>
+        {error && <p className="error">{error}</p>}
+      </main>
+    )
+  }
+
+  const done = phase === 'done'
+  const progressLabel = questionNumber && totalQuestions
+    ? `question ${questionNumber} of ${totalQuestions}` +
+      (phase === 'probing' ? ' · probing' : phase === 'clarifying' ? ' · clarifying' : '')
+    : null
+
   return (
     <main className="wrap">
       <header className="topbar">
@@ -116,19 +197,18 @@ function App() {
             </select>
           </label>
           <span className={`status status-${status}`}>{status}</span>
+          {progressLabel && <span className="progress">{progressLabel}</span>}
           {latencyMs !== null && <span className="latency">last turn: {latencyMs} ms</span>}
         </div>
       </header>
 
       <section className="chat">
         <div className="messages">
-          {history.length === 0 && (
-            <p className="hint">
-              Press the mic (or type below) to start — the interviewer replies out loud.
-            </p>
-          )}
           {history.map((m, i) => (
-            <p key={i} className={m.role}>
+            <p
+              key={i}
+              className={done && i === history.length - 1 ? 'wrap-up' : m.role}
+            >
               <strong>{m.role === 'user' ? 'You' : 'Interviewer'}:</strong> {m.content}
             </p>
           ))}
@@ -138,31 +218,39 @@ function App() {
           <div ref={chatEndRef} />
         </div>
 
-        <form onSubmit={handleTextSubmit} className="composer">
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Type here"
-            disabled={status === 'thinking'}
-          />
-          <button type="submit" disabled={status === 'thinking' || !draft.trim()}>
-            Send
-          </button>
-          {status === 'recording' ? (
-            <button type="button" className="recording" onClick={stopRecording}>
-              ⏹ Stop
+        {done ? (
+          <div className="composer">
+            <button type="button" onClick={startNewInterview}>
+              Start new interview
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={startRecording}
-              disabled={status !== 'idle'}
-              aria-label="Answer by voice"
-            >
-              🎤
+          </div>
+        ) : (
+          <form onSubmit={handleTextSubmit} className="composer">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Type here"
+              disabled={status === 'thinking'}
+            />
+            <button type="submit" disabled={status === 'thinking' || !draft.trim()}>
+              Send
             </button>
-          )}
-        </form>
+            {status === 'recording' ? (
+              <button type="button" className="recording" onClick={stopRecording}>
+                ⏹ Stop
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={startRecording}
+                disabled={status !== 'idle'}
+                aria-label="Answer by voice"
+              >
+                🎤
+              </button>
+            )}
+          </form>
+        )}
       </section>
 
       {error && <p className="error">{error}</p>}

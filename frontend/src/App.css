@@ -61,6 +61,23 @@ button.recording {
   color: #888;
 }
 
+.progress {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.domain-picker {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.messages .wrap-up {
+  color: #7ab;
+  font-style: italic;
+}
+
 /* Chat panel (wireframe v1): scrollable messages, composer pinned at bottom */
 .chat {
   flex: 1;
