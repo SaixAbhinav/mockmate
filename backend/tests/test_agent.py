@@ -115,6 +115,49 @@ async def test_answered_false_when_budget_exhausted_unresolved():
     assert record["answered"] is False
 
 
+async def test_forced_advance_does_not_speak_the_dangling_follow_up():
+    provider = FakeProvider(
+        [
+            Judgment("probe", "r1", False),
+            Judgment("probe", "r2", False),
+            Judgment("probe", "Tell me more about X?", False),
+        ]
+    )
+    graph = build_graph(provider)
+    state = start_session("s1", "ml_genai", seed=1)
+
+    state = await submit_answer(graph, state, "a1")
+    state = await submit_answer(graph, state, "a2")
+    state = await submit_answer(graph, state, "a3")
+
+    # Budget exhausted: the judge's follow-up must be discarded, not spoken.
+    assert "Tell me more about X?" not in state["reply"]
+    if state["phase"] == "asking":
+        assert state["current_question"]["question"] in state["reply"]
+
+
+async def test_answered_true_when_probe_budget_exhausts():
+    provider = FakeProvider(
+        [
+            Judgment("probe", "r1", False),
+            Judgment("probe", "r2", False),
+            Judgment("probe", "r3", False),
+        ]
+    )
+    graph = build_graph(provider)
+    state = start_session("s1", "ml_genai", seed=1)
+    first_question = state["current_question"]["question"]
+
+    state = await submit_answer(graph, state, "a1")
+    state = await submit_answer(graph, state, "a2")
+    state = await submit_answer(graph, state, "a3")
+
+    # Probe exhaustion = shallow but answered (ADR 0006); only Clarify
+    # exhaustion marks answered: false.
+    record = next(c for c in state["completed"] if c["question"] == first_question)
+    assert record["answered"] is True
+
+
 async def test_malformed_judgment_defaults_to_advance_without_crashing():
     provider = FakeProvider([ProviderError("boom")])
     graph = build_graph(provider)
