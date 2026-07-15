@@ -3,7 +3,14 @@ import json
 import httpx
 import pytest
 
-from app.providers import GroqProvider, Judgment, ProviderError, ScriptedProvider
+from app.providers import (
+    GroqProvider,
+    Judgment,
+    ProviderError,
+    ProviderMalformedError,
+    ProviderUnavailableError,
+    ScriptedProvider,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -113,3 +120,23 @@ async def test_groq_wrap_up_returns_text(fake_groq_client):
     provider = GroqProvider(api_key="fake-key")
     text = await provider.wrap_up(transcript=[{"role": "user", "content": "hi"}])
     assert text == "Great work today!"
+
+
+async def test_groq_http_error_raises_provider_unavailable(fake_groq_client):
+    fake_groq_client.response = FakeResponse({"error": "rate limited"}, status_code=429)
+    provider = GroqProvider(api_key="fake-key")
+    with pytest.raises(ProviderUnavailableError):
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+
+
+async def test_groq_unexpected_response_shape_raises_provider_malformed(fake_groq_client):
+    fake_groq_client.response = FakeResponse({"unexpected": "shape"})
+    provider = GroqProvider(api_key="fake-key")
+    with pytest.raises(ProviderMalformedError):
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+
+
+def test_both_failure_types_are_provider_errors():
+    # Callers that don't care which failure it was (the evaluator) catch the base.
+    assert issubclass(ProviderMalformedError, ProviderError)
+    assert issubclass(ProviderUnavailableError, ProviderError)

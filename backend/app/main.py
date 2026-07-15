@@ -9,6 +9,7 @@ single-process demo traffic; orphaned sessions are known, deferred debt.
 """
 
 import base64
+import logging
 import uuid
 
 from dotenv import load_dotenv
@@ -17,11 +18,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .agent import InterviewState, start_session, submit_answer, build_graph
-from .providers import get_provider
+from .providers import ProviderUnavailableError, get_provider
 from .stt import SttUnavailableError, transcribe
 from .tts import DEFAULT_VOICE, VOICES, synthesize
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="MockMate")
 
@@ -127,7 +130,14 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
         raise HTTPException(status_code=404, detail="unknown session")
 
     graph = build_graph(get_provider())
-    state = await submit_answer(graph, state, req.transcript)
+    try:
+        state = await submit_answer(graph, state, req.transcript)
+    except ProviderUnavailableError as exc:
+        logger.warning("interviewer unavailable for session %s: %s", session_id, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="the interviewer is temporarily unavailable — please try again",
+        ) from exc
     _sessions[session_id] = state
 
     audio = await synthesize(state["reply"], req.voice)

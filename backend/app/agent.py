@@ -16,7 +16,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from .providers import LLMProvider, ProviderError
+from .providers import LLMProvider, ProviderMalformedError
 from .questions import Question, plan_session
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ def build_graph(provider: LLMProvider):
                     "unknown judge classification %r, defaulting to advance",
                     judgment.classification,
                 )
-        except ProviderError as exc:
+        except ProviderMalformedError as exc:
             logger.warning("malformed judge response, defaulting to advance: %s", exc)
 
         return {**state, "classification": classification, "reply": reply, "current_answered": answered}
