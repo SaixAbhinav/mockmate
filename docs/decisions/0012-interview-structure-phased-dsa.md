@@ -49,7 +49,11 @@ flow (not a second mode alongside it):
 - **Day 4 — phased Session + resume warm-up.** Phase machine, resume
   upload and text extraction, resume-grounded warm-up through the existing
   graph. DSA phase stubbed (session wraps after warm-up). New dependency
-  to flag: a PDF text extractor (`pypdf`).
+  to flag: a PDF text extractor (`pypdf`). Also: cross-provider failover
+  in the provider layer — on a Groq 429/outage, retry the call against
+  Gemini when both keys are configured (two genuinely separate quotas;
+  pooling multiple free-tier accounts of one provider was rejected as a
+  ToS violation).
 - **Day 5 — DSA round.** DSA question bank, code editor pane (new frontend
   dependency to flag: CodeMirror), run-against-tests subprocess runner,
   interviewer reaction/probing on submit. If this proves too big in its own
