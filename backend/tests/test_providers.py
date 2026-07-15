@@ -23,7 +23,13 @@ class FakeResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise httpx.HTTPStatusError("error", request=None, response=self)
+            # Mirror real httpx: the message embeds the request URL. FakeAsyncClient.post
+            # records last_request before returning this response, so it's populated by
+            # the time raise_for_status() runs.
+            url = FakeAsyncClient.last_request["url"] if FakeAsyncClient.last_request else "unknown"
+            raise httpx.HTTPStatusError(
+                f"HTTP error '{self.status_code}' for url '{url}'", request=None, response=self
+            )
 
     def json(self):
         return self._json
