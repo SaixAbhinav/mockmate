@@ -1,7 +1,12 @@
 import pytest
 
 from app.agent import build_graph, start_session, submit_answer
-from app.providers import Judgment, ProviderError, ScriptedProvider
+from app.providers import (
+    Judgment,
+    ProviderMalformedError,
+    ProviderUnavailableError,
+    ScriptedProvider,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -159,7 +164,7 @@ async def test_answered_true_when_probe_budget_exhausts():
 
 
 async def test_malformed_judgment_defaults_to_advance_without_crashing():
-    provider = FakeProvider([ProviderError("boom")])
+    provider = FakeProvider([ProviderMalformedError("boom")])
     graph = build_graph(provider)
     state = start_session("s1", "ml_genai", seed=1)
 
@@ -177,3 +182,16 @@ async def test_unknown_classification_defaults_to_advance():
     result = await submit_answer(graph, state, "answer")
 
     assert result["classification"] == "advance"
+
+
+async def test_unavailable_provider_propagates_and_does_not_advance():
+    # A transient 429 must not silently burn the Candidate's question (ADR 0013).
+    provider = FakeProvider([ProviderUnavailableError("rate limited")])
+    graph = build_graph(provider)
+    state = start_session("s1", "ml_genai", seed=1)
+    first_question = state["current_question"]
+
+    with pytest.raises(ProviderUnavailableError):
+        await submit_answer(graph, state, "my answer")
+
+    assert state["current_question"] == first_question  # caller's state untouched

@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.providers import ProviderUnavailableError
 
 
 @pytest.fixture
@@ -66,3 +67,18 @@ def test_full_session_reaches_done(client):
 def test_turn_endpoint_removed(client):
     resp = client.post("/api/turn", json={"history": []})
     assert resp.status_code == 404
+
+
+def test_answer_returns_503_when_provider_unavailable(client, monkeypatch):
+    from app import main as main_module
+
+    session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
+
+    async def unavailable(*args, **kwargs):
+        raise ProviderUnavailableError("rate limited")
+
+    monkeypatch.setattr(main_module, "submit_answer", unavailable)
+
+    resp = client.post(f"/api/session/{session_id}/answer", json={"transcript": "a"})
+
+    assert resp.status_code == 503

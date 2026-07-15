@@ -3,7 +3,15 @@ import json
 import httpx
 import pytest
 
-from app.providers import GroqProvider, Judgment, ProviderError, ScriptedProvider
+from app.providers import (
+    GeminiProvider,
+    GroqProvider,
+    Judgment,
+    ProviderError,
+    ProviderMalformedError,
+    ProviderUnavailableError,
+    ScriptedProvider,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -15,7 +23,13 @@ class FakeResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise httpx.HTTPStatusError("error", request=None, response=self)
+            # Mirror real httpx: the message embeds the request URL. FakeAsyncClient.post
+            # records last_request before returning this response, so it's populated by
+            # the time raise_for_status() runs.
+            url = FakeAsyncClient.last_request["url"] if FakeAsyncClient.last_request else "unknown"
+            raise httpx.HTTPStatusError(
+                f"HTTP error '{self.status_code}' for url '{url}'", request=None, response=self
+            )
 
     def json(self):
         return self._json
@@ -42,6 +56,12 @@ class FakeAsyncClient:
 
 @pytest.fixture
 def fake_groq_client(monkeypatch):
+    monkeypatch.setattr("app.providers.httpx.AsyncClient", FakeAsyncClient)
+    return FakeAsyncClient
+
+
+@pytest.fixture
+def fake_gemini_client(monkeypatch):
     monkeypatch.setattr("app.providers.httpx.AsyncClient", FakeAsyncClient)
     return FakeAsyncClient
 
@@ -113,3 +133,38 @@ async def test_groq_wrap_up_returns_text(fake_groq_client):
     provider = GroqProvider(api_key="fake-key")
     text = await provider.wrap_up(transcript=[{"role": "user", "content": "hi"}])
     assert text == "Great work today!"
+
+
+async def test_groq_http_error_raises_provider_unavailable(fake_groq_client):
+    fake_groq_client.response = FakeResponse({"error": "rate limited"}, status_code=429)
+    provider = GroqProvider(api_key="fake-key")
+    with pytest.raises(ProviderUnavailableError):
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+
+
+async def test_groq_unexpected_response_shape_raises_provider_malformed(fake_groq_client):
+    fake_groq_client.response = FakeResponse({"unexpected": "shape"})
+    provider = GroqProvider(api_key="fake-key")
+    with pytest.raises(ProviderMalformedError):
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+
+
+# --- GeminiProvider: the API key rides in the URL, so failures must never echo it ---
+
+
+async def test_gemini_http_error_raises_provider_unavailable_without_leaking_key(
+    fake_gemini_client,
+):
+    fake_gemini_client.response = FakeResponse({"error": "rate limited"}, status_code=429)
+    provider = GeminiProvider(api_key="secret-test-key-12345")
+    with pytest.raises(ProviderUnavailableError) as exc_info:
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+    message = str(exc_info.value)
+    assert "429" in message
+    assert "secret-test-key-12345" not in message
+
+
+def test_both_failure_types_are_provider_errors():
+    # Callers that don't care which failure it was (the evaluator) catch the base.
+    assert issubclass(ProviderMalformedError, ProviderError)
+    assert issubclass(ProviderUnavailableError, ProviderError)

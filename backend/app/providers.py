@@ -38,7 +38,15 @@ WRAP_UP_SYSTEM_PROMPT = (
 
 
 class ProviderError(Exception):
-    """Raised when a provider's structured response is malformed."""
+    """Base: the provider could not give a usable answer."""
+
+
+class ProviderMalformedError(ProviderError):
+    """The provider replied, but the reply could not be parsed."""
+
+
+class ProviderUnavailableError(ProviderError):
+    """The provider could not be reached — transport failure, rate limit, timeout."""
 
 
 @dataclass(frozen=True)
@@ -83,7 +91,7 @@ def _parse_judgment(content: str) -> Judgment:
             answered=bool(data["answered"]),
         )
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise ProviderError(f"malformed judge response: {content!r}") from exc
+        raise ProviderMalformedError(f"malformed judge response: {content!r}") from exc
 
 
 class GroqProvider:
@@ -121,14 +129,24 @@ class GroqProvider:
         payload = {"model": self._model, "messages": messages, "max_tokens": max_tokens}
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._api_key}"},
-                json=payload,
-            )
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"].strip()
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    self._url,
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    json=payload,
+                )
+                resp.raise_for_status()
+                body = resp.json()
+        except httpx.HTTPError as exc:
+            raise ProviderUnavailableError(f"groq request failed: {exc}") from exc
+        except ValueError as exc:  # includes json.JSONDecodeError
+            raise ProviderMalformedError(f"groq returned a non-JSON body: {exc}") from exc
+
+        try:
+            return body["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ProviderMalformedError(f"unexpected groq response shape: {body!r}") from exc
 
 
 class GeminiProvider:
@@ -184,10 +202,27 @@ class GeminiProvider:
         }
         if generation_config:
             payload["generationConfig"] = generation_config
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                body = resp.json()
+        except httpx.HTTPStatusError as exc:
+            # Never interpolate str(exc): the URL carries the API key.
+            raise ProviderUnavailableError(
+                f"gemini returned {exc.response.status_code}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise ProviderUnavailableError(
+                f"gemini request failed: {type(exc).__name__}"
+            ) from exc
+        except ValueError as exc:
+            raise ProviderMalformedError("gemini returned a non-JSON body") from exc
+
+        try:
+            return body["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ProviderMalformedError(f"unexpected gemini response shape: {body!r}") from exc
 
 
 class ScriptedProvider:
