@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from app.providers import (
+    GeminiProvider,
     GroqProvider,
     Judgment,
     ProviderError,
@@ -49,6 +50,12 @@ class FakeAsyncClient:
 
 @pytest.fixture
 def fake_groq_client(monkeypatch):
+    monkeypatch.setattr("app.providers.httpx.AsyncClient", FakeAsyncClient)
+    return FakeAsyncClient
+
+
+@pytest.fixture
+def fake_gemini_client(monkeypatch):
     monkeypatch.setattr("app.providers.httpx.AsyncClient", FakeAsyncClient)
     return FakeAsyncClient
 
@@ -134,6 +141,21 @@ async def test_groq_unexpected_response_shape_raises_provider_malformed(fake_gro
     provider = GroqProvider(api_key="fake-key")
     with pytest.raises(ProviderMalformedError):
         await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+
+
+# --- GeminiProvider: the API key rides in the URL, so failures must never echo it ---
+
+
+async def test_gemini_http_error_raises_provider_unavailable_without_leaking_key(
+    fake_gemini_client,
+):
+    fake_gemini_client.response = FakeResponse({"error": "rate limited"}, status_code=429)
+    provider = GeminiProvider(api_key="secret-test-key-12345")
+    with pytest.raises(ProviderUnavailableError) as exc_info:
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+    message = str(exc_info.value)
+    assert "429" in message
+    assert "secret-test-key-12345" not in message
 
 
 def test_both_failure_types_are_provider_errors():
