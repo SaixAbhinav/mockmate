@@ -36,6 +36,35 @@ WRAP_UP_SYSTEM_PROMPT = (
     "40 words; it is spoken aloud."
 )
 
+EVALUATE_SYSTEM_PROMPT = (
+    "You are evaluating one answer from a completed mock technical interview. "
+    "You are given the question, a list of hints, and everything the candidate "
+    "said for that question (their first answer plus any follow-up responses).\n"
+    "The hints are notes written for the interviewer, phrased as instructions "
+    "like 'Ask about X'. They tell you which topics a strong answer would touch "
+    "on. Judge whether the candidate covered the underlying topic. Never reward "
+    "or penalise the candidate for asking anything — asking is the interviewer's "
+    "job, not theirs. The hints are not exhaustive: an answer can be excellent "
+    "without matching them.\n"
+    "Score the answer on three dimensions, each an integer from 1 to 5: "
+    "'correctness' (is what they said accurate?), 'depth' (did they go beyond "
+    "the surface?), and 'clarity' (was it organised and easy to follow as "
+    "speech?). Also write one sentence of specific, actionable feedback. Do not "
+    "be generous: 3 means adequate, 5 means excellent. Respond with strict JSON "
+    'only: {"correctness": int, "depth": int, "clarity": int, "comment": string}.'
+)
+
+ASSESS_SYSTEM_PROMPT = (
+    "You are assessing a completed mock technical interview for the candidate. "
+    "You are given the per-question scores and comments. Write a brief overall "
+    "assessment of two or three sentences, then list key strengths and areas to "
+    "work on. Be specific and reference what they actually said. Give at most 3 "
+    "strengths and at most 3 improvements. Respond with strict JSON only: "
+    '{"assessment": string, "strengths": [string], "improvements": [string]}.'
+)
+
+DIMENSIONS = ("correctness", "depth", "clarity")
+
 
 class ProviderError(Exception):
     """Base: the provider could not give a usable answer."""
@@ -56,6 +85,25 @@ class Judgment:
     answered: bool
 
 
+@dataclass(frozen=True)
+class AnswerScore:
+    """One question's Score: its three Dimensions plus a one-sentence comment."""
+
+    correctness: int
+    depth: int
+    clarity: int
+    comment: str
+
+
+@dataclass(frozen=True)
+class Assessment:
+    """The prose half of an Evaluation: overall read, strengths, improvements."""
+
+    assessment: str
+    strengths: list[str]
+    improvements: list[str]
+
+
 class LLMProvider(Protocol):
     name: str
 
@@ -71,6 +119,16 @@ class LLMProvider(Protocol):
 
     async def wrap_up(self, transcript: list[dict[str, str]]) -> str:
         """Returns a closing remark; no scoring."""
+        ...
+
+    async def evaluate_answer(
+        self, question: str, follow_up_hints: list[str], answers: list[str]
+    ) -> AnswerScore:
+        """Score one completed question's exchange. Raises ProviderError on failure."""
+        ...
+
+    async def assess_session(self, scores: list[dict]) -> Assessment:
+        """Overall assessment from per-question Scores. Raises ProviderError on failure."""
         ...
 
 
@@ -92,6 +150,57 @@ def _parse_judgment(content: str) -> Judgment:
         )
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
         raise ProviderMalformedError(f"malformed judge response: {content!r}") from exc
+
+
+def _evaluate_user_turn(question: str, follow_up_hints: list[str], answers: list[str]) -> str:
+    said = "\n".join(f"- {a}" for a in answers)
+    return (
+        f"Question: {question}\n"
+        f"Interviewer hints (topics a strong answer touches): {follow_up_hints}\n"
+        f"Everything the candidate said for this question:\n{said}"
+    )
+
+
+def _assess_user_turn(scores: list[dict]) -> str:
+    lines = []
+    for s in scores:
+        if s.get("skipped"):
+            lines.append(f"- {s['question']}: never answered")
+        elif s.get("unscored") or "correctness" not in s:
+            lines.append(f"- {s['question']}: could not be scored")
+        else:
+            lines.append(
+                f"- {s['question']}: correctness {s['correctness']}, "
+                f"depth {s['depth']}, clarity {s['clarity']} — {s['comment']}"
+            )
+    return "Per-question results:\n" + "\n".join(lines)
+
+
+def _parse_score(content: str) -> AnswerScore:
+    try:
+        data = json.loads(content)
+        values = {d: int(data[d]) for d in DIMENSIONS}
+        comment = data["comment"]
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise ProviderMalformedError(f"malformed score response: {content!r}") from exc
+    for dimension, value in values.items():
+        if not 1 <= value <= 5:
+            raise ProviderMalformedError(f"{dimension} out of range 1-5: {value}")
+    if not isinstance(comment, str):
+        raise ProviderMalformedError(f"comment must be a string: {comment!r}")
+    return AnswerScore(**values, comment=comment)
+
+
+def _parse_assessment(content: str) -> Assessment:
+    try:
+        data = json.loads(content)
+        return Assessment(
+            assessment=data["assessment"],
+            strengths=list(data["strengths"]),
+            improvements=list(data["improvements"]),
+        )
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ProviderMalformedError(f"malformed assessment response: {content!r}") from exc
 
 
 class GroqProvider:
@@ -122,6 +231,22 @@ class GroqProvider:
     async def wrap_up(self, transcript: list[dict[str, str]]) -> str:
         messages = [{"role": "system", "content": WRAP_UP_SYSTEM_PROMPT}, *transcript]
         return await self._chat_json(messages, max_tokens=150, json_mode=False)
+
+    async def evaluate_answer(
+        self, question: str, follow_up_hints: list[str], answers: list[str]
+    ) -> AnswerScore:
+        messages = [
+            {"role": "system", "content": EVALUATE_SYSTEM_PROMPT},
+            {"role": "user", "content": _evaluate_user_turn(question, follow_up_hints, answers)},
+        ]
+        return _parse_score(await self._chat_json(messages, max_tokens=300))
+
+    async def assess_session(self, scores: list[dict]) -> Assessment:
+        messages = [
+            {"role": "system", "content": ASSESS_SYSTEM_PROMPT},
+            {"role": "user", "content": _assess_user_turn(scores)},
+        ]
+        return _parse_assessment(await self._chat_json(messages, max_tokens=500))
 
     async def _chat_json(
         self, messages: list[dict[str, str]], max_tokens: int, json_mode: bool = True
@@ -177,6 +302,27 @@ class GeminiProvider:
     async def wrap_up(self, transcript: list[dict[str, str]]) -> str:
         contents = self._to_gemini_contents(transcript)
         return await self._generate(WRAP_UP_SYSTEM_PROMPT, contents)
+
+    async def evaluate_answer(
+        self, question: str, follow_up_hints: list[str], answers: list[str]
+    ) -> AnswerScore:
+        contents = [
+            {
+                "role": "user",
+                "parts": [{"text": _evaluate_user_turn(question, follow_up_hints, answers)}],
+            }
+        ]
+        content = await self._generate(
+            EVALUATE_SYSTEM_PROMPT, contents, response_mime_type="application/json"
+        )
+        return _parse_score(content)
+
+    async def assess_session(self, scores: list[dict]) -> Assessment:
+        contents = [{"role": "user", "parts": [{"text": _assess_user_turn(scores)}]}]
+        content = await self._generate(
+            ASSESS_SYSTEM_PROMPT, contents, response_mime_type="application/json"
+        )
+        return _parse_assessment(content)
 
     @staticmethod
     def _to_gemini_contents(history: list[dict[str, str]]) -> list[dict]:
@@ -247,6 +393,26 @@ class ScriptedProvider:
         return (
             "That's the end of the scripted demo. Add a GROQ_API_KEY or "
             "GEMINI_API_KEY to backend slash dot env to unlock a real interviewer."
+        )
+
+    async def evaluate_answer(
+        self, question: str, follow_up_hints: list[str], answers: list[str]
+    ) -> AnswerScore:
+        return AnswerScore(
+            correctness=3,
+            depth=3,
+            clarity=3,
+            comment="Scripted demo score — add an API key for a real evaluation.",
+        )
+
+    async def assess_session(self, scores: list[dict]) -> Assessment:
+        return Assessment(
+            assessment=(
+                "That's the end of the scripted demo. Add a GROQ_API_KEY or "
+                "GEMINI_API_KEY to backend slash dot env to unlock real scoring."
+            ),
+            strengths=["Completed the interview"],
+            improvements=["Add an API key to get real feedback"],
         )
 
 
