@@ -127,14 +127,23 @@ def build_graph(provider: LLMProvider):
         }
 
     def advance(state: InterviewState) -> InterviewState:
-        budget_exhausted_unresolved = (
+        forced = (
             state["classification"] in ("probe", "clarify")
             and state["follow_up_count"] >= FOLLOW_UP_BUDGET
         )
+        if forced:
+            # The judge's reply is a follow-up question we can no longer ask —
+            # discard it for a neutral transition. Clarify exhaustion means the
+            # candidate never truly answered; probe exhaustion is shallow-but-
+            # answered (ADR 0006).
+            state = {
+                **state,
+                "reply": "Alright, let's move on.",
+                "current_answered": state["classification"] == "probe",
+            }
         return {
             **state,
             "transcript": _append_turn(state),
-            "current_answered": False if budget_exhausted_unresolved else state["current_answered"],
             "phase": "advancing",
         }
 
