@@ -166,7 +166,7 @@ def _assess_user_turn(scores: list[dict]) -> str:
     for s in scores:
         if s.get("skipped"):
             lines.append(f"- {s['question']}: never answered")
-        elif s.get("unscored") or "correctness" not in s:
+        elif s.get("unscored") or not all(k in s for k in (*DIMENSIONS, "comment")):
             lines.append(f"- {s['question']}: could not be scored")
         else:
             lines.append(

@@ -252,3 +252,20 @@ async def test_groq_assess_session_raises_on_missing_field(fake_groq_client):
     provider = GroqProvider(api_key="fake-key")
     with pytest.raises(ProviderMalformedError):
         await provider.assess_session([{"question": "Q"}])
+
+
+async def test_groq_assess_session_raises_on_partial_score(fake_groq_client):
+    # correctness/depth/clarity present but comment missing: _assess_user_turn must
+    # treat this as "could not be scored" rather than raising a raw KeyError while
+    # building the prompt. The fake response below is itself malformed (mirrors
+    # test_groq_assess_session_raises_on_missing_field) so the only way this test
+    # can end up raising ProviderMalformedError is if control reaches the response
+    # parsing at all — proving _assess_user_turn didn't blow up first.
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response(json.dumps({"assessment": "x"}))
+    )
+    provider = GroqProvider(api_key="fake-key")
+    with pytest.raises(ProviderMalformedError):
+        await provider.assess_session(
+            [{"question": "Q", "correctness": 4, "depth": 3, "clarity": 5}]
+        )
