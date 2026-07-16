@@ -17,7 +17,7 @@ from typing import Annotated, TypedDict
 from langgraph.graph import END, StateGraph
 from langgraph.types import Send
 
-from .providers import DIMENSIONS, LLMProvider, ProviderError
+from .providers import DIMENSIONS, LLMProvider, ProviderError, ProviderUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,7 @@ class EvaluationState(TypedDict):
     assessment: str
     strengths: list[str]
     improvements: list[str]
+    assessment_retryable: bool
 
 
 def aggregate_scores(scores: list[dict]) -> dict[str, float | None]:
@@ -107,7 +108,7 @@ def build_evaluator_graph(provider: LLMProvider):
             # Never logger.exception here — a chained httpx traceback can carry
             # Gemini's API key.
             logger.warning("could not score %r: %s", unit["question"], exc)
-            scored = {**base, "unscored": True}
+            scored = {**base, "unscored": True, "retryable": isinstance(exc, ProviderUnavailableError)}
         return {"scores": [scored]}
 
     async def assess(state: EvaluationState) -> dict:
@@ -118,6 +119,7 @@ def build_evaluator_graph(provider: LLMProvider):
                 "assessment": result.assessment,
                 "strengths": list(result.strengths),
                 "improvements": list(result.improvements),
+                "assessment_retryable": False,
             }
         except ProviderError as exc:
             logger.warning("could not assess session: %s", exc)
@@ -125,6 +127,7 @@ def build_evaluator_graph(provider: LLMProvider):
                 "assessment": "Could not generate an overall assessment for this interview.",
                 "strengths": [],
                 "improvements": [],
+                "assessment_retryable": isinstance(exc, ProviderUnavailableError),
             }
 
     graph = StateGraph(EvaluationState)
@@ -156,10 +159,14 @@ async def evaluate_session(
             "assessment": "",
             "strengths": [],
             "improvements": [],
+            "assessment_retryable": False,
         }
     )
     ordered = sorted(result["scores"], key=lambda s: s["index"])
     answered = sum(1 for s in ordered if not s.get("skipped"))
+    retryable_failure = result["assessment_retryable"] or any(
+        s.get("retryable") for s in ordered
+    )
     return {
         "session_id": session_id,
         "domain": domain,
@@ -168,6 +175,10 @@ async def evaluate_session(
         "assessment": result["assessment"],
         "strengths": result["strengths"],
         "improvements": result["improvements"],
-        # `index` is an internal ordering detail — the list is already ordered.
-        "questions": [{k: v for k, v in s.items() if k != "index"} for s in ordered],
+        # `index`/`retryable` are internal ordering/caching details, not part
+        # of the Candidate-facing Evaluation.
+        "questions": [
+            {k: v for k, v in s.items() if k not in ("index", "retryable")} for s in ordered
+        ],
+        "retryable_failure": retryable_failure,
     }

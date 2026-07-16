@@ -201,9 +201,17 @@ async def evaluation(session_id: str) -> EvaluationResponse:
     # setdefault does not await, so it is atomic on the event loop.
     lock = _evaluation_locks.setdefault(session_id, asyncio.Lock())
     async with lock:
-        if session_id not in _evaluations:
+        if session_id in _evaluations:
+            result = _evaluations[session_id]
+        else:
             graph = build_evaluator_graph(get_provider())
-            _evaluations[session_id] = await evaluate_session(
+            result = await evaluate_session(
                 graph, session_id, state["domain"], state["completed"]
             )
-    return EvaluationResponse(**_evaluations[session_id])
+            # A transient provider failure (rate limit, timeout) should not be
+            # baked in forever — only cache once every Score/Assessment call
+            # either succeeded or failed deterministically (malformed).
+            if not result["retryable_failure"]:
+                _evaluations[session_id] = result
+
+    return EvaluationResponse(**{k: v for k, v in result.items() if k != "retryable_failure"})

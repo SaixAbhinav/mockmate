@@ -64,7 +64,11 @@ to whichever day makes the demo genuinely public.
 **Robustness**, mirroring ADR 0006: a failed Score — malformed *or* unavailable
 (ADR 0013) — marks that one question `unscored` and the Evaluation still renders; a
 failed assessment falls back to a neutral line. One bad response never sinks the whole
-Evaluation.
+Evaluation. A malformed failure is deterministic — re-running against the same model and
+prompt would likely fail the same way — so an Evaluation containing one is still cached.
+An unavailable failure is transient, so an Evaluation containing one is **not** cached;
+the next request retries the whole evaluation rather than permanently returning a
+degraded Score or Assessment.
 
 ## Consequences
 

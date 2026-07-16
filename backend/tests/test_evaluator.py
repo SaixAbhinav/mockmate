@@ -152,3 +152,39 @@ async def test_averages_are_none_when_nothing_was_scored():
         "depth": None,
         "clarity": None,
     }
+
+
+async def test_retryable_failure_flag_set_when_score_unavailable():
+    provider = FakeEvaluator(scores={"Q1": ProviderUnavailableError("429")})
+    graph = build_evaluator_graph(provider)
+
+    evaluation = await evaluate_session(graph, "s1", "ml_genai", [make_record("Q1")])
+
+    assert evaluation["retryable_failure"] is True
+
+
+async def test_retryable_failure_flag_not_set_when_score_malformed():
+    provider = FakeEvaluator(scores={"Q1": ProviderMalformedError("bad json")})
+    graph = build_evaluator_graph(provider)
+
+    evaluation = await evaluate_session(graph, "s1", "ml_genai", [make_record("Q1")])
+
+    assert evaluation["retryable_failure"] is False
+
+
+async def test_retryable_failure_flag_set_when_assessment_unavailable():
+    provider = FakeEvaluator(assessment=ProviderUnavailableError("429"))
+    graph = build_evaluator_graph(provider)
+
+    evaluation = await evaluate_session(graph, "s1", "ml_genai", [make_record("Q1")])
+
+    assert evaluation["retryable_failure"] is True
+
+
+async def test_retryable_key_absent_from_per_question_output():
+    provider = FakeEvaluator(scores={"Q1": ProviderUnavailableError("429")})
+    graph = build_evaluator_graph(provider)
+
+    evaluation = await evaluate_session(graph, "s1", "ml_genai", [make_record("Q1")])
+
+    assert "retryable" not in evaluation["questions"][0]

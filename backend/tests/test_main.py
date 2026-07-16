@@ -188,3 +188,34 @@ async def test_concurrent_evaluation_requests_score_only_once(monkeypatch, anyio
     assert first.status_code == 200 and second.status_code == 200
     assert first.json() == second.json()
     assert len(calls) == 1
+
+
+def test_evaluation_with_retryable_failure_is_not_cached(client, monkeypatch):
+    from app import main as main_module
+
+    session_id = _finish_session(client)
+    calls = []
+
+    async def flaky(*args, **kwargs):
+        calls.append(1)
+        return {
+            "session_id": session_id,
+            "domain": "ml_genai",
+            "averages": {"correctness": None, "depth": None, "clarity": None},
+            "coverage": {"answered": 0, "total": 0},
+            "assessment": "Could not generate an overall assessment for this interview.",
+            "strengths": [],
+            "improvements": [],
+            "questions": [],
+            "retryable_failure": True,
+        }
+
+    monkeypatch.setattr(main_module, "evaluate_session", flaky)
+
+    first = client.get(f"/api/session/{session_id}/evaluation")
+    second = client.get(f"/api/session/{session_id}/evaluation")
+
+    assert first.status_code == 200
+    assert "retryable_failure" not in first.json()
+    assert second.status_code == 200
+    assert len(calls) == 2  # not cached — evaluate_session ran on both requests
