@@ -52,3 +52,8 @@ already has malformed-recovery semantics (ADR 0013).
   how the demo signals that failover is armed.
 - Secondary quota is consumed silently. Fine at demo traffic; a metrics
   day can count failovers if it matters.
+- The evaluator's fan-out (ADR 0011) amplifies a Groq outage into a burst on
+  Gemini: all ~9 concurrent `score_answer` calls fail over simultaneously
+  during a single Evaluation, plus the `assess_session` call. Correct
+  (Gemini's 1,500/day request budget absorbs it easily) but worth naming —
+  it is the concrete shape of "mixed graders" above, not a separate risk.
