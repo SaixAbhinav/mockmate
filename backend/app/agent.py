@@ -1,6 +1,6 @@
 """Interviewer agent: the state machine that runs one Session (ADR 0006).
 
-`plan_session` and the initial `ask_question` are plain functions
+`plan_warm_up` and the initial `ask_question` are plain functions
 (`start_session`) - they're a straight-line setup with no branching, so a
 graph node would add ceremony without value. The actual LangGraph
 `StateGraph` covers the part that branches: judging each answer and routing
@@ -17,11 +17,29 @@ from typing import TypedDict
 from langgraph.graph import END, StateGraph
 
 from .providers import LLMProvider, ProviderMalformedError
-from .questions import Question, plan_session
+from .questions import Question, plan_warm_up
 
 logger = logging.getLogger(__name__)
 
 FOLLOW_UP_BUDGET = 2
+
+# The fixed opener for every Session (ADR 0015). Scripted, never paraphrased,
+# mirroring ADR 0008's verbatim rule for bank questions. Judged for
+# probe/clarify like any question, but excluded from the Evaluation.
+INTRO_QUESTION = {
+    "domain": "any",
+    "topic": "background",
+    "difficulty": "easy",
+    "question": (
+        "To get us started, tell me about yourself - your background and "
+        "what you have been working on recently."
+    ),
+    "follow_up_hints": [
+        "Ask for more detail about a project or role they mention",
+        "Ask what they enjoyed most or found hardest in that work",
+    ],
+    "stage": "intro",
+}
 
 
 class InterviewState(TypedDict):
@@ -44,8 +62,27 @@ def _question_to_dict(question: Question) -> dict:
     return asdict(question)
 
 
-def start_session(session_id: str, domain: str, seed: int | None = None) -> InterviewState:
-    queue = [_question_to_dict(q) for q in plan_session(domain, seed=seed)]
+def start_session(
+    session_id: str,
+    domain: str,
+    seed: int | None = None,
+    warm_up_questions: list[dict] | None = None,
+) -> InterviewState:
+    """Build a Session: the fixed intro, then the warm-up round (ADR 0015).
+
+    `warm_up_questions` are resume-grounded questions from the provider (the
+    ADR 0003 shape minus domain, stamped here). When absent - no resume, no
+    key, or generation failed - the warm-up falls back to a curated draw from
+    the domain bank. The DSA stage arrives on Day 5 (ADR 0012).
+    """
+    if warm_up_questions:
+        warm_up = [{**q, "domain": domain, "stage": "warm_up"} for q in warm_up_questions]
+    else:
+        warm_up = [
+            {**_question_to_dict(q), "stage": "warm_up"}
+            for q in plan_warm_up(domain, seed=seed)
+        ]
+    queue = [dict(INTRO_QUESTION), *warm_up]
     current = queue.pop(0)
     return InterviewState(
         session_id=session_id,
@@ -76,6 +113,7 @@ def _close_out_current_question(state: InterviewState) -> list[dict]:
         "question": question["question"],
         "topic": question["topic"],
         "difficulty": question["difficulty"],
+        "stage": question["stage"],
         "follow_up_hints": question["follow_up_hints"],
         "answers": list(state["current_answers"]),
         "answered": state["current_answered"],

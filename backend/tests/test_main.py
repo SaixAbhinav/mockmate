@@ -25,7 +25,7 @@ def test_create_session_returns_first_question(client):
     assert data["first_question"]
     assert data["audio_b64"]
     assert data["question_number"] == 1
-    assert 6 <= data["total_questions"] <= 8
+    assert data["total_questions"] == 4  # intro + 3 warm-up (ADR 0012)
 
 
 def test_create_session_rejects_unknown_domain(client):
@@ -118,7 +118,7 @@ def test_evaluation_returns_scores_for_finished_session(client):
     assert data["assessment"]
     assert set(data["averages"]) == {"correctness", "depth", "clarity"}
     assert data["coverage"]["total"] == len(data["questions"])
-    assert len(data["questions"]) >= 6
+    assert len(data["questions"]) == 3  # 3 warm-ups; the intro is excluded (ADR 0015)
     first = data["questions"][0]
     assert first["question"]
     assert 1 <= first["correctness"] <= 5
