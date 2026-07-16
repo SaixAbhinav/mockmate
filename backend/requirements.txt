@@ -7,3 +7,4 @@ python-multipart==0.0.20
 pyyaml==6.0.2
 langgraph==0.2.74
 langchain-core==0.3.35
+pypdf==5.1.0
