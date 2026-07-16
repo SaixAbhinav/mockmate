@@ -97,6 +97,8 @@ function App() {
     }
   }
 
+  // Deliberately does NOT reset resumeId/resumeName/resumeStatus: the uploaded
+  // resume stays valid for a second interview without re-uploading.
   function startNewInterview() {
     setScreen('domain')
     setSessionId(null)

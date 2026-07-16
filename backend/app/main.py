@@ -194,9 +194,9 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
             )
         except ProviderError as exc:
             logger.warning(
-                "warm-up generation failed for session %s, using the question bank: %s",
+                "warm-up generation failed for session %s, using the question bank (%s)",
                 session_id,
-                exc,
+                type(exc).__name__,
             )
 
     state = start_session(session_id, req.domain, warm_up_questions=warm_up_questions)
