@@ -7,11 +7,14 @@ application code.
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 JUDGE_SYSTEM_PROMPT = (
     "You are a professional but friendly technical interviewer running a mock "
@@ -416,9 +419,74 @@ class ScriptedProvider:
         )
 
 
+class FailoverProvider:
+    """Two providers, two quotas: retry on the secondary when the primary is
+    unreachable (ADR 0014).
+
+    Only ProviderUnavailableError triggers failover. A malformed reply is a
+    deterministic parsing failure, not an outage — retrying it on a different
+    model would mask real bugs, and each caller already has its own
+    malformed-reply recovery (ADR 0013).
+    """
+
+    def __init__(self, primary: LLMProvider, secondary: LLMProvider):
+        self._primary = primary
+        self._secondary = secondary
+        self.name = f"{primary.name}+{secondary.name}"
+
+    async def _call(self, method: str, **kwargs):
+        try:
+            return await getattr(self._primary, method)(**kwargs)
+        except ProviderUnavailableError as exc:
+            # Log the provider's own message only — never the chained traceback
+            # (Gemini's key rides in its request URL, ADR 0013).
+            logger.warning(
+                "%s unavailable, failing over to %s: %s",
+                self._primary.name,
+                self._secondary.name,
+                exc,
+            )
+            return await getattr(self._secondary, method)(**kwargs)
+
+    async def judge_answer(
+        self,
+        question: str,
+        follow_up_hints: list[str],
+        history: list[dict[str, str]],
+        answer: str,
+    ) -> Judgment:
+        return await self._call(
+            "judge_answer",
+            question=question,
+            follow_up_hints=follow_up_hints,
+            history=history,
+            answer=answer,
+        )
+
+    async def wrap_up(self, transcript: list[dict[str, str]]) -> str:
+        return await self._call("wrap_up", transcript=transcript)
+
+    async def evaluate_answer(
+        self, question: str, follow_up_hints: list[str], answers: list[str]
+    ) -> AnswerScore:
+        return await self._call(
+            "evaluate_answer",
+            question=question,
+            follow_up_hints=follow_up_hints,
+            answers=answers,
+        )
+
+    async def assess_session(self, scores: list[dict]) -> Assessment:
+        return await self._call("assess_session", scores=scores)
+
+
 def get_provider() -> LLMProvider:
-    if key := os.getenv("GROQ_API_KEY"):
-        return GroqProvider(key)
-    if key := os.getenv("GEMINI_API_KEY"):
-        return GeminiProvider(key)
+    groq_key = os.getenv("GROQ_API_KEY")
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if groq_key and gemini_key:
+        return FailoverProvider(GroqProvider(groq_key), GeminiProvider(gemini_key))
+    if groq_key:
+        return GroqProvider(groq_key)
+    if gemini_key:
+        return GeminiProvider(gemini_key)
     return ScriptedProvider()
