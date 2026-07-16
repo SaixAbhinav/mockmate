@@ -6,6 +6,7 @@ import pytest
 from app.providers import (
     AnswerScore,
     Assessment,
+    FailoverProvider,
     GeminiProvider,
     GroqProvider,
     Judgment,
@@ -13,6 +14,7 @@ from app.providers import (
     ProviderMalformedError,
     ProviderUnavailableError,
     ScriptedProvider,
+    get_provider,
 )
 
 pytestmark = pytest.mark.anyio
@@ -269,3 +271,98 @@ async def test_groq_assess_session_raises_on_partial_score(fake_groq_client):
         await provider.assess_session(
             [{"question": "Q", "correctness": 4, "depth": 3, "clarity": 5}]
         )
+
+
+# --- FailoverProvider: Groq primary, Gemini secondary (ADR 0014) ---
+
+
+class OneSidedProvider:
+    """Test double for failover: every method returns a canned value or raises."""
+
+    def __init__(self, name, error=None):
+        self.name = name
+        self.error = error
+        self.calls = []
+
+    async def _respond(self, method, value):
+        self.calls.append(method)
+        if self.error:
+            raise self.error
+        return value
+
+    async def judge_answer(self, question, follow_up_hints, history, answer):
+        return await self._respond("judge_answer", Judgment("advance", f"{self.name} reply", True))
+
+    async def wrap_up(self, transcript):
+        return await self._respond("wrap_up", f"{self.name} closing")
+
+    async def evaluate_answer(self, question, follow_up_hints, answers):
+        return await self._respond("evaluate_answer", AnswerScore(3, 3, 3, self.name))
+
+    async def assess_session(self, scores):
+        return await self._respond("assess_session", Assessment(self.name, [], []))
+
+
+async def test_failover_returns_primary_result_without_touching_secondary():
+    primary, secondary = OneSidedProvider("primary"), OneSidedProvider("secondary")
+    provider = FailoverProvider(primary, secondary)
+
+    judgment = await provider.judge_answer(
+        question="Q", follow_up_hints=["h"], history=[], answer="a"
+    )
+
+    assert judgment.reply == "primary reply"
+    assert secondary.calls == []
+
+
+async def test_failover_uses_secondary_when_primary_unavailable():
+    primary = OneSidedProvider("primary", error=ProviderUnavailableError("429"))
+    secondary = OneSidedProvider("secondary")
+    provider = FailoverProvider(primary, secondary)
+
+    judgment = await provider.judge_answer(
+        question="Q", follow_up_hints=["h"], history=[], answer="a"
+    )
+
+    assert judgment.reply == "secondary reply"
+    assert primary.calls == ["judge_answer"] and secondary.calls == ["judge_answer"]
+
+
+async def test_failover_covers_every_provider_method():
+    primary = OneSidedProvider("primary", error=ProviderUnavailableError("down"))
+    secondary = OneSidedProvider("secondary")
+    provider = FailoverProvider(primary, secondary)
+
+    assert (await provider.wrap_up([])) == "secondary closing"
+    score = await provider.evaluate_answer(question="Q", follow_up_hints=["h"], answers=["a"])
+    assert score.comment == "secondary"
+    assert (await provider.assess_session([])).assessment == "secondary"
+
+
+async def test_failover_does_not_retry_malformed_replies():
+    # Malformed is deterministic, not an outage; each caller already has its own
+    # malformed-recovery (ADR 0013). Retrying elsewhere would mask real bugs.
+    primary = OneSidedProvider("primary", error=ProviderMalformedError("bad json"))
+    secondary = OneSidedProvider("secondary")
+    provider = FailoverProvider(primary, secondary)
+
+    with pytest.raises(ProviderMalformedError):
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+
+    assert secondary.calls == []
+
+
+async def test_failover_raises_when_both_sides_unavailable():
+    primary = OneSidedProvider("primary", error=ProviderUnavailableError("429"))
+    secondary = OneSidedProvider("secondary", error=ProviderUnavailableError("quota"))
+    provider = FailoverProvider(primary, secondary)
+
+    with pytest.raises(ProviderUnavailableError):
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+
+
+def test_get_provider_returns_failover_when_both_keys_present(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "g1")
+    monkeypatch.setenv("GEMINI_API_KEY", "g2")
+
+    assert get_provider().name == "groq+gemini"

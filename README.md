@@ -42,6 +42,8 @@ With no API key the app runs a scripted demo interviewer (walks the question
 queue, never probes). For a real one, copy `backend/.env.example` to
 `backend/.env` and add a free-tier key from
 [Groq](https://console.groq.com) or [Google AI Studio](https://aistudio.google.com).
+With **both** keys set, Groq is the primary and any call it cannot serve
+(rate limit, outage) is retried once against Gemini automatically.
 The same `GROQ_API_KEY` also powers voice transcription (Whisper); without it,
 voice input is unavailable and the text box is the only way to answer.
 
@@ -53,7 +55,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-61 passed.
+72 passed.
 
 ## Design decisions
 
