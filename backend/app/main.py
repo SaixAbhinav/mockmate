@@ -175,7 +175,7 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
         logger.warning("interviewer unavailable for session %s: %s", session_id, exc)
         raise HTTPException(
             status_code=503,
-            detail="the interviewer is temporarily unavailable — please try again",
+            detail="the AI provider is temporarily unavailable — please try again",
         ) from exc
     _sessions[session_id] = state
 
@@ -196,7 +196,7 @@ async def evaluation(session_id: str) -> EvaluationResponse:
     if state is None:
         raise HTTPException(status_code=404, detail="unknown session")
     if state["phase"] != "done":
-        raise HTTPException(status_code=409, detail="interview is not finished yet")
+        raise HTTPException(status_code=409, detail="the Session is not finished yet")
 
     # setdefault does not await, so it is atomic on the event loop.
     lock = _evaluation_locks.setdefault(session_id, asyncio.Lock())
