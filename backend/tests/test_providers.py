@@ -302,6 +302,19 @@ class OneSidedProvider:
     async def assess_session(self, scores):
         return await self._respond("assess_session", Assessment(self.name, [], []))
 
+    async def generate_warm_up_questions(self, resume_text, domain):
+        return await self._respond(
+            "generate_warm_up_questions",
+            [
+                {
+                    "topic": "t",
+                    "difficulty": "easy",
+                    "question": f"{self.name} Q",
+                    "follow_up_hints": ["h"],
+                }
+            ],
+        )
+
 
 async def test_failover_returns_primary_result_without_touching_secondary():
     primary, secondary = OneSidedProvider("primary"), OneSidedProvider("secondary")
@@ -366,3 +379,85 @@ def test_get_provider_returns_failover_when_both_keys_present(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "g2")
 
     assert get_provider().name == "groq+gemini"
+
+
+# --- Warm-up question generation (ADR 0015) ---
+
+
+def warm_up_entry(question="Q", difficulty="easy"):
+    return {
+        "topic": "projects",
+        "difficulty": difficulty,
+        "question": question,
+        "follow_up_hints": ["Ask about X"],
+    }
+
+
+async def test_scripted_provider_generates_no_warm_up_questions():
+    # Empty list = "I can't do this" — the endpoint falls back to the curated bank.
+    provider = ScriptedProvider()
+    assert await provider.generate_warm_up_questions("resume text", "ml_genai") == []
+
+
+async def test_groq_generate_warm_up_questions_parses_valid_json(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response(
+            json.dumps(
+                {
+                    "questions": [
+                        warm_up_entry("Q1", "easy"),
+                        warm_up_entry("Q2", "medium"),
+                        warm_up_entry("Q3", "medium"),
+                    ]
+                }
+            )
+        )
+    )
+    provider = GroqProvider(api_key="fake-key")
+
+    questions = await provider.generate_warm_up_questions("I built things.", "ml_genai")
+
+    assert [q["question"] for q in questions] == ["Q1", "Q2", "Q3"]
+    assert questions[0]["follow_up_hints"] == ["Ask about X"]
+
+
+async def test_groq_generate_warm_up_rejects_wrong_count(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response(json.dumps({"questions": [warm_up_entry("only one")]}))
+    )
+    provider = GroqProvider(api_key="fake-key")
+
+    with pytest.raises(ProviderMalformedError):
+        await provider.generate_warm_up_questions("resume", "ml_genai")
+
+
+async def test_groq_generate_warm_up_rejects_bad_difficulty(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response(
+            json.dumps(
+                {"questions": [warm_up_entry("Q1"), warm_up_entry("Q2", "impossible")]}
+            )
+        )
+    )
+    provider = GroqProvider(api_key="fake-key")
+
+    with pytest.raises(ProviderMalformedError):
+        await provider.generate_warm_up_questions("resume", "ml_genai")
+
+
+async def test_groq_generate_warm_up_raises_on_malformed_json(fake_groq_client):
+    fake_groq_client.response = FakeResponse(groq_chat_response("not json"))
+    provider = GroqProvider(api_key="fake-key")
+
+    with pytest.raises(ProviderMalformedError):
+        await provider.generate_warm_up_questions("resume", "ml_genai")
+
+
+async def test_failover_delegates_generate_warm_up_questions():
+    primary = OneSidedProvider("primary", error=ProviderUnavailableError("429"))
+    secondary = OneSidedProvider("secondary")
+    provider = FailoverProvider(primary, secondary)
+
+    questions = await provider.generate_warm_up_questions(resume_text="r", domain="ml_genai")
+
+    assert questions[0]["question"] == "secondary Q"
