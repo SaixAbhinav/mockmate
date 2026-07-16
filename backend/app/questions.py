@@ -64,18 +64,20 @@ def load_bank(domain: str, questions_dir: Path = DEFAULT_QUESTIONS_DIR) -> list[
     return questions
 
 
-def plan_session(
+def plan_warm_up(
     domain: str,
     *,
     seed: int | None = None,
     questions_dir: Path = DEFAULT_QUESTIONS_DIR,
 ) -> list[Question]:
-    """Build a Session's question queue: a seeded random draw of ~6-8
+    """Curated fallback for the warm-up round (ADR 0012/0015): a seeded draw
+    of 3 questions from the domain's bank, sorted easy->hard.
 
-    questions from the domain's bank, sorted easy->hard (ADR 0008).
+    Used when no resume was uploaded or resume-grounded generation was
+    unavailable. The old 6-8 question domain round this bank used to power
+    was replaced by the phased Session (ADR 0012).
     """
     bank = load_bank(domain, questions_dir=questions_dir)
     rng = random.Random(seed)
-    n = min(rng.randint(6, 8), len(bank))
-    drawn = rng.sample(bank, n)
+    drawn = rng.sample(bank, min(3, len(bank)))
     return sorted(drawn, key=lambda q: DIFFICULTIES.index(q.difficulty))

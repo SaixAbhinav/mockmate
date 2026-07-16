@@ -20,8 +20,14 @@ function App() {
   const [voice, setVoice] = useState('')
   const [evaluation, setEvaluation] = useState(null)
   const [evaluating, setEvaluating] = useState(false)
+  const [stage, setStage] = useState(null) // intro | warm_up | done
+  const [warmUpSource, setWarmUpSource] = useState(null) // resume | bank
+  const [resumeId, setResumeId] = useState(null)
+  const [resumeName, setResumeName] = useState('')
+  const [resumeStatus, setResumeStatus] = useState('none') // none | uploading | ready | failed
   const recorderRef = useRef(null)
   const chatEndRef = useRef(null)
+  const resumeUploadTokenRef = useRef(0)
 
   useEffect(() => {
     fetch('/api/voices')
@@ -72,7 +78,7 @@ function App() {
       const resp = await fetch('/api/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain, voice }),
+        body: JSON.stringify({ domain, voice, resume_id: resumeId }),
       })
       if (!resp.ok) throw new Error(`backend returned ${resp.status}`)
       const data = await resp.json()
@@ -80,6 +86,8 @@ function App() {
       setHistory([{ role: 'assistant', content: data.first_question }])
       setQuestionNumber(data.question_number)
       setTotalQuestions(data.total_questions)
+      setStage(data.stage)
+      setWarmUpSource(data.warm_up_source)
       setPhase(null)
       setScreen('interview')
       await playAudio(data.audio_b64)
@@ -89,6 +97,8 @@ function App() {
     }
   }
 
+  // Deliberately does NOT reset resumeId/resumeName/resumeStatus: the uploaded
+  // resume stays valid for a second interview without re-uploading.
   function startNewInterview() {
     setScreen('domain')
     setSessionId(null)
@@ -100,6 +110,35 @@ function App() {
     setStatus('idle')
     setEvaluation(null)
     setEvaluating(false)
+    setStage(null)
+    setWarmUpSource(null)
+  }
+
+  async function handleResumeChange(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    const token = ++resumeUploadTokenRef.current
+    setResumeStatus('uploading')
+    setError(null)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const resp = await fetch('/api/resume', { method: 'POST', body: form })
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}))
+        throw new Error(body.detail || `resume upload failed (${resp.status})`)
+      }
+      const data = await resp.json()
+      if (token !== resumeUploadTokenRef.current) return // a newer upload superseded this one
+      setResumeId(data.resume_id)
+      setResumeName(file.name)
+      setResumeStatus('ready')
+    } catch (err) {
+      if (token !== resumeUploadTokenRef.current) return // a newer upload superseded this one
+      setResumeId(null)
+      setResumeStatus('failed')
+      setError(String(err))
+    }
   }
 
   async function sendTranscript(transcript) {
@@ -123,6 +162,7 @@ function App() {
       setPhase(data.phase)
       setQuestionNumber(data.question_number)
       setTotalQuestions(data.total_questions)
+      setStage(data.stage)
       await playAudio(data.audio_b64)
     } catch (err) {
       setHistory(history) // roll back the optimistic append so a failed turn leaves no orphan message
@@ -192,8 +232,21 @@ function App() {
               ))}
             </select>
           </label>
-          <button onClick={startInterview} disabled={status === 'thinking'}>
-            {status === 'thinking' ? 'Starting…' : 'Start interview'}
+          <label className="voice-row">
+            Resume (optional):
+            <input type="file" accept=".pdf,.txt" onChange={handleResumeChange} />
+          </label>
+          {resumeStatus === 'uploading' && <p className="hint">Uploading resume…</p>}
+          {resumeStatus === 'ready' && (
+            <p className="hint">Warm-up questions will be grounded in {resumeName}</p>
+          )}
+          <button
+            onClick={startInterview}
+            disabled={status === 'thinking' || resumeStatus === 'uploading'}
+          >
+            {status === 'thinking'
+              ? (resumeId ? 'Reading your resume…' : 'Starting…')
+              : 'Start interview'}
           </button>
         </section>
         {error && <p className="error">{error}</p>}
@@ -202,8 +255,10 @@ function App() {
   }
 
   const done = phase === 'done'
+  const STAGE_LABELS = { intro: 'intro', warm_up: 'warm-up' }
   const progressLabel = questionNumber && totalQuestions
-    ? `question ${questionNumber} of ${totalQuestions}` +
+    ? `${STAGE_LABELS[stage] ? STAGE_LABELS[stage] + ' · ' : ''}` +
+      `question ${questionNumber} of ${totalQuestions}` +
       (phase === 'probing' ? ' · probing' : phase === 'clarifying' ? ' · clarifying' : '')
     : null
 
@@ -225,6 +280,12 @@ function App() {
           {latencyMs !== null && <span className="latency">last turn: {latencyMs} ms</span>}
         </div>
       </header>
+
+      {resumeId && warmUpSource === 'bank' && (
+        <p className="hint">
+          Resume grounding unavailable — this warm-up uses curated questions.
+        </p>
+      )}
 
       <section className="chat">
         <div className="messages">

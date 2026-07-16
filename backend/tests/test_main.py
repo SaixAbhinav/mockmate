@@ -25,7 +25,7 @@ def test_create_session_returns_first_question(client):
     assert data["first_question"]
     assert data["audio_b64"]
     assert data["question_number"] == 1
-    assert 6 <= data["total_questions"] <= 8
+    assert data["total_questions"] == 4  # intro + 3 warm-up (ADR 0012)
 
 
 def test_create_session_rejects_unknown_domain(client):
@@ -118,7 +118,7 @@ def test_evaluation_returns_scores_for_finished_session(client):
     assert data["assessment"]
     assert set(data["averages"]) == {"correctness", "depth", "clarity"}
     assert data["coverage"]["total"] == len(data["questions"])
-    assert len(data["questions"]) >= 6
+    assert len(data["questions"]) == 3  # 3 warm-ups; the intro is excluded (ADR 0015)
     first = data["questions"][0]
     assert first["question"]
     assert 1 <= first["correctness"] <= 5
@@ -219,3 +219,91 @@ def test_evaluation_with_retryable_failure_is_not_cached(client, monkeypatch):
     assert "retryable_failure" not in first.json()
     assert second.status_code == 200
     assert len(calls) == 2  # not cached — evaluate_session ran on both requests
+
+
+# Comfortably over the 200-char floor; contains "LangGraph" for the grounding assert.
+SAMPLE_RESUME = (
+    b"I built MockMate, a voice-based mock interviewer, using LangGraph "
+    b"agents, FastAPI, and React, with a fully tested backend. " * 3
+)
+
+
+def _upload_resume(client, text=SAMPLE_RESUME):
+    return client.post(
+        "/api/resume", files={"file": ("resume.txt", text, "text/plain")}
+    )
+
+
+def test_upload_txt_resume_returns_id(client):
+    resp = _upload_resume(client)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["resume_id"]
+    assert data["characters"] == len(SAMPLE_RESUME.decode().strip())
+
+
+def test_upload_unreadable_resume_returns_400(client):
+    resp = client.post(
+        "/api/resume", files={"file": ("resume.pdf", b"not a pdf", "application/pdf")}
+    )
+    assert resp.status_code == 400
+
+
+def test_create_session_with_unknown_resume_returns_404(client):
+    resp = client.post("/api/session", json={"domain": "ml_genai", "resume_id": "nope"})
+    assert resp.status_code == 404
+
+
+def test_first_question_is_the_intro(client):
+    data = client.post("/api/session", json={"domain": "ml_genai"}).json()
+
+    assert data["stage"] == "intro"
+    assert data["question_number"] == 1
+    assert "tell me about yourself" in data["first_question"].lower()
+
+
+def test_session_with_resume_uses_generated_warm_up(client, monkeypatch):
+    from app import main as main_module
+
+    class GeneratingProvider:
+        name = "fake"
+
+        async def generate_warm_up_questions(self, resume_text, domain):
+            assert "LangGraph" in resume_text  # the stored text reaches the provider
+            return [
+                {"topic": "projects", "difficulty": "easy",
+                 "question": "Tell me about MockMate.", "follow_up_hints": ["Ask about the evaluator"]},
+                {"topic": "skills", "difficulty": "medium",
+                 "question": "How did you test the agent?", "follow_up_hints": ["Ask about fakes"]},
+            ]
+
+    monkeypatch.setattr(main_module, "get_provider", lambda: GeneratingProvider())
+    resume_id = _upload_resume(client).json()["resume_id"]
+
+    data = client.post(
+        "/api/session", json={"domain": "ml_genai", "resume_id": resume_id}
+    ).json()
+
+    assert data["total_questions"] == 3  # intro + the 2 generated questions
+    assert data["warm_up_source"] == "resume"
+
+
+def test_session_falls_back_to_bank_when_generation_fails(client, monkeypatch):
+    from app import main as main_module
+
+    class FailingProvider:
+        name = "fake"
+
+        async def generate_warm_up_questions(self, resume_text, domain):
+            raise ProviderUnavailableError("429")
+
+    monkeypatch.setattr(main_module, "get_provider", lambda: FailingProvider())
+    resume_id = _upload_resume(client).json()["resume_id"]
+
+    resp = client.post("/api/session", json={"domain": "ml_genai", "resume_id": resume_id})
+
+    assert resp.status_code == 200  # a failed generation never blocks a Session
+    data = resp.json()
+    assert data["total_questions"] == 4  # intro + 3 curated
+    assert data["warm_up_source"] == "bank"  # degradation is labeled, never silent

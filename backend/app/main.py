@@ -20,7 +20,8 @@ from pydantic import BaseModel
 
 from .agent import InterviewState, start_session, submit_answer, build_graph
 from .evaluator import build_evaluator_graph, evaluate_session
-from .providers import ProviderUnavailableError, get_provider
+from .providers import ProviderError, ProviderUnavailableError, get_provider
+from .resume import ResumeError, extract_resume_text
 from .stt import SttUnavailableError, transcribe
 from .tts import DEFAULT_VOICE, VOICES, synthesize
 
@@ -50,10 +51,15 @@ _evaluations: dict[str, dict] = {}
 # certainty in dev, not a theoretical race.
 _evaluation_locks: dict[str, asyncio.Lock] = {}
 
+# Uploaded resumes, reduced to capped plain text (ADR 0015). In-memory like
+# everything else (ADR 0007): anonymous, dies with the process. PII - never log.
+_resumes: dict[str, str] = {}
+
 
 class CreateSessionRequest(BaseModel):
     domain: str
     voice: str = DEFAULT_VOICE
+    resume_id: str | None = None
 
 
 class CreateSessionResponse(BaseModel):
@@ -62,6 +68,8 @@ class CreateSessionResponse(BaseModel):
     audio_b64: str
     question_number: int
     total_questions: int
+    stage: str
+    warm_up_source: str  # "resume" | "bank" — the Candidate can tell which interview they got
 
 
 class AnswerRequest(BaseModel):
@@ -75,6 +83,7 @@ class AnswerResponse(BaseModel):
     phase: str
     question_number: int
     total_questions: int
+    stage: str
 
 
 class QuestionScore(BaseModel):
@@ -118,6 +127,10 @@ def _external_phase(state: InterviewState) -> str:
     return "advancing" if state["phase"] == "asking" else state["phase"]
 
 
+def _stage(state: InterviewState) -> str:
+    return "done" if state["phase"] == "done" else state["current_question"]["stage"]
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "provider": get_provider().name}
@@ -142,13 +155,51 @@ async def transcribe_audio(file: UploadFile):
     return {"transcript": text}
 
 
+@app.post("/api/resume")
+async def upload_resume(file: UploadFile):
+    data = await file.read()
+    try:
+        text = extract_resume_text(
+            data, file.filename or "", file.content_type or ""
+        )
+    except ResumeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    resume_id = str(uuid.uuid4())
+    _resumes[resume_id] = text
+    return {"resume_id": resume_id, "characters": len(text)}
+
+
 @app.post("/api/session", response_model=CreateSessionResponse)
 async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     if req.domain not in SUPPORTED_DOMAINS:
         raise HTTPException(status_code=400, detail=f"unsupported domain {req.domain!r}")
 
+    resume_text = None
+    if req.resume_id is not None:
+        resume_text = _resumes.get(req.resume_id)
+        if resume_text is None:
+            raise HTTPException(status_code=404, detail="unknown resume")
+
     session_id = str(uuid.uuid4())
-    state = start_session(session_id, req.domain)
+
+    warm_up_questions = None
+    if resume_text is not None:
+        try:
+            # Empty list (ScriptedProvider) and ProviderError both mean the
+            # same thing here: use the curated fallback. A failed generation
+            # never blocks a Session (ADR 0015).
+            warm_up_questions = (
+                await get_provider().generate_warm_up_questions(resume_text, req.domain)
+                or None
+            )
+        except ProviderError as exc:
+            logger.warning(
+                "warm-up generation failed for session %s, using the question bank (%s)",
+                session_id,
+                type(exc).__name__,
+            )
+
+    state = start_session(session_id, req.domain, warm_up_questions=warm_up_questions)
     _sessions[session_id] = state
 
     audio = await synthesize(state["current_question"]["question"], req.voice)
@@ -159,6 +210,8 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
         audio_b64=base64.b64encode(audio).decode(),
         question_number=number,
         total_questions=total,
+        stage=_stage(state),
+        warm_up_source="resume" if warm_up_questions else "bank",
     )
 
 
@@ -187,6 +240,7 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
         phase=_external_phase(state),
         question_number=number,
         total_questions=total,
+        stage=_stage(state),
     )
 
 

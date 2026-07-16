@@ -14,6 +14,8 @@ from typing import Protocol
 
 import httpx
 
+from .questions import DIFFICULTIES
+
 logger = logging.getLogger(__name__)
 
 JUDGE_SYSTEM_PROMPT = (
@@ -64,6 +66,22 @@ ASSESS_SYSTEM_PROMPT = (
     "work on. Be specific and reference what they actually said. Give at most 3 "
     "strengths and at most 3 improvements. Respond with strict JSON only: "
     '{"assessment": string, "strengths": [string], "improvements": [string]}.'
+)
+
+WARM_UP_QUESTIONS_SYSTEM_PROMPT = (
+    "You are preparing the warm-up round of a mock technical interview. You "
+    "are given the interview domain and the candidate's resume text. Write "
+    "exactly 3 short spoken interview questions about the candidate's own "
+    "background - their projects, skills, and experience - preferring items "
+    "related to the domain. Every question must be answerable from what the "
+    "resume actually says: never invent projects, employers, or skills that "
+    "are not on it. For each question also write: 'topic' (one or two words), "
+    "'difficulty' (one of easy, medium, hard), and 'follow_up_hints' - 2 "
+    "instructions to the interviewer for probing deeper, phrased like 'Ask "
+    "about X'. Keep each question under 30 words - it is spoken aloud. "
+    'Respond with strict JSON only: {"questions": [{"topic": string, '
+    '"difficulty": "easy"|"medium"|"hard", "question": string, '
+    '"follow_up_hints": [string]}]}.'
 )
 
 DIMENSIONS = ("correctness", "depth", "clarity")
@@ -134,6 +152,14 @@ class LLMProvider(Protocol):
         """Overall assessment from per-question Scores. Raises ProviderError on failure."""
         ...
 
+    async def generate_warm_up_questions(
+        self, resume_text: str, domain: str
+    ) -> list[dict]:
+        """Resume-grounded warm-up questions (ADR 0015), in the ADR 0003 shape
+        (minus domain). Empty list means the provider cannot generate them.
+        Raises ProviderError on failure."""
+        ...
+
 
 def _judge_user_turn(question: str, follow_up_hints: list[str], answer: str) -> str:
     return (
@@ -177,6 +203,38 @@ def _assess_user_turn(scores: list[dict]) -> str:
                 f"depth {s['depth']}, clarity {s['clarity']} — {s['comment']}"
             )
     return "Per-question results:\n" + "\n".join(lines)
+
+
+def _warm_up_user_turn(resume_text: str, domain: str) -> str:
+    return f"Interview domain: {domain}\nResume:\n{resume_text}"
+
+
+def _parse_warm_up_questions(content: str) -> list[dict]:
+    try:
+        data = json.loads(content)
+        questions = [
+            {
+                "topic": entry["topic"],
+                "difficulty": entry["difficulty"],
+                "question": entry["question"],
+                "follow_up_hints": list(entry["follow_up_hints"]),
+            }
+            for entry in data["questions"]
+        ]
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ProviderMalformedError(
+            f"malformed warm-up questions response: {content!r}"
+        ) from exc
+    if not 2 <= len(questions) <= 4:
+        raise ProviderMalformedError(
+            f"expected 2-4 warm-up questions, got {len(questions)}"
+        )
+    for q in questions:
+        if q["difficulty"] not in DIFFICULTIES:
+            raise ProviderMalformedError(f"bad warm-up difficulty: {q['difficulty']!r}")
+        if not q["follow_up_hints"]:
+            raise ProviderMalformedError("warm-up follow_up_hints must be non-empty")
+    return questions
 
 
 def _parse_score(content: str) -> AnswerScore:
@@ -250,6 +308,15 @@ class GroqProvider:
             {"role": "user", "content": _assess_user_turn(scores)},
         ]
         return _parse_assessment(await self._chat_json(messages, max_tokens=500))
+
+    async def generate_warm_up_questions(
+        self, resume_text: str, domain: str
+    ) -> list[dict]:
+        messages = [
+            {"role": "system", "content": WARM_UP_QUESTIONS_SYSTEM_PROMPT},
+            {"role": "user", "content": _warm_up_user_turn(resume_text, domain)},
+        ]
+        return _parse_warm_up_questions(await self._chat_json(messages, max_tokens=800))
 
     async def _chat_json(
         self, messages: list[dict[str, str]], max_tokens: int, json_mode: bool = True
@@ -326,6 +393,17 @@ class GeminiProvider:
             ASSESS_SYSTEM_PROMPT, contents, response_mime_type="application/json"
         )
         return _parse_assessment(content)
+
+    async def generate_warm_up_questions(
+        self, resume_text: str, domain: str
+    ) -> list[dict]:
+        contents = [
+            {"role": "user", "parts": [{"text": _warm_up_user_turn(resume_text, domain)}]}
+        ]
+        content = await self._generate(
+            WARM_UP_QUESTIONS_SYSTEM_PROMPT, contents, response_mime_type="application/json"
+        )
+        return _parse_warm_up_questions(content)
 
     @staticmethod
     def _to_gemini_contents(history: list[dict[str, str]]) -> list[dict]:
@@ -418,6 +496,12 @@ class ScriptedProvider:
             improvements=["Add an API key to get real feedback"],
         )
 
+    async def generate_warm_up_questions(
+        self, resume_text: str, domain: str
+    ) -> list[dict]:
+        # No model, no generation - the endpoint falls back to the curated bank.
+        return []
+
 
 class FailoverProvider:
     """Two providers, two quotas: retry on the secondary when the primary is
@@ -478,6 +562,13 @@ class FailoverProvider:
 
     async def assess_session(self, scores: list[dict]) -> Assessment:
         return await self._call("assess_session", scores=scores)
+
+    async def generate_warm_up_questions(
+        self, resume_text: str, domain: str
+    ) -> list[dict]:
+        return await self._call(
+            "generate_warm_up_questions", resume_text=resume_text, domain=domain
+        )
 
 
 def get_provider() -> LLMProvider:

@@ -240,3 +240,53 @@ async def test_answers_do_not_leak_between_questions():
 
     assert state["completed"][0]["answers"] == ["a1"]
     assert state["completed"][1]["answers"] == ["a2"]
+
+
+async def test_intro_question_is_asked_first():
+    state = start_session("s1", "ml_genai", seed=1)
+
+    assert state["current_question"]["stage"] == "intro"
+    assert "tell me about yourself" in state["current_question"]["question"].lower()
+
+
+async def test_generated_warm_up_questions_fill_the_queue():
+    generated = [
+        {"topic": "projects", "difficulty": "easy", "question": "GQ1", "follow_up_hints": ["h"]},
+        {"topic": "skills", "difficulty": "medium", "question": "GQ2", "follow_up_hints": ["h"]},
+    ]
+
+    state = start_session("s1", "ml_genai", seed=1, warm_up_questions=generated)
+
+    assert [q["question"] for q in state["queue"]] == ["GQ1", "GQ2"]
+    assert all(q["stage"] == "warm_up" for q in state["queue"])
+    assert all(q["domain"] == "ml_genai" for q in state["queue"])
+
+
+async def test_curated_fallback_fills_the_queue_when_no_generated_questions():
+    state = start_session("s1", "ml_genai", seed=1)
+
+    assert len(state["queue"]) == 3  # intro is current; 3 curated warm-ups queued
+    assert all(q["stage"] == "warm_up" for q in state["queue"])
+
+
+async def test_completed_records_carry_stage():
+    provider = FakeProvider([Judgment("advance", "ok", True)])
+    graph = build_graph(provider)
+    state = start_session("s1", "ml_genai", seed=1)
+
+    state = await submit_answer(graph, state, "about me")
+
+    assert state["completed"][0]["stage"] == "intro"
+
+
+async def test_session_wraps_after_warm_up():
+    provider = FakeProvider([Judgment("advance", "ok", True)])
+    graph = build_graph(provider)
+    state = start_session("s1", "ml_genai", seed=1)
+
+    answers = 0
+    while state["phase"] != "done":
+        state = await submit_answer(graph, state, "answer")
+        answers += 1
+
+    assert answers == 4  # intro + 3 warm-up; the DSA round arrives on Day 5 (ADR 0012)

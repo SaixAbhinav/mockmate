@@ -149,6 +149,9 @@ async def evaluate_session(
     compiled_graph, session_id: str, domain: str, completed: list[dict]
 ) -> dict:
     """Run the evaluation pass and return the Candidate-facing Evaluation."""
+    # The intro is an ice-breaker, not a scored question (ADR 0015). Records
+    # without a stage predate the phased Session and are all real questions.
+    completed = [r for r in completed if r.get("stage") != "intro"]
     result = await compiled_graph.ainvoke(
         {
             "session_id": session_id,

@@ -6,11 +6,12 @@ interview-prep SaaS" genre, rebuilt as an open, self-hostable app.
 Speak your answers; an AI interviewer asks questions, probes follow-ups, and
 (soon) scores you against rubrics and targets your weak areas.
 
-**Status: evaluator agent.** A full mock interview runs end to end — pick a
-domain, work through a question queue, get probed or clarified on shallow or
-off-topic answers, reach a wrap-up — and then get scored: every answer rated on
-correctness, depth, and clarity, with per-question feedback and an overall
-assessment.
+**Status: phased interview.** A Session now runs like a real interview's
+opening: a "tell me about yourself" intro, then a warm-up round grounded in
+your uploaded resume (PDF or text, optional) — with probing and clarifying
+follow-ups throughout — then a wrap-up and a scored Evaluation. The live
+DSA coding round (ADR 0012) is next. With both a Groq and a Gemini key
+configured, provider failures fail over automatically.
 
 ## Run it
 
@@ -55,7 +56,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-72 passed.
+97 passed.
 
 ## Design decisions
 
@@ -64,7 +65,7 @@ as a short ADR — context, options, choice, consequences.
 
 ## Dependencies
 
-Backend: FastAPI, uvicorn, edge-tts, httpx, python-dotenv, pyyaml, langgraph,
+Backend: FastAPI, uvicorn, edge-tts, httpx, python-dotenv, pyyaml, langgraph, pypdf,
 langchain-core (pinned in `backend/requirements.txt`); pytest, anyio for
 tests (`backend/requirements-dev.txt`). Frontend: React via Vite. Coming
 later (flagged in advance per repo rules): Chroma, sentence-transformers.

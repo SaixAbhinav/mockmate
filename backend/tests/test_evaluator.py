@@ -188,3 +188,20 @@ async def test_retryable_key_absent_from_per_question_output():
     evaluation = await evaluate_session(graph, "s1", "ml_genai", [make_record("Q1")])
 
     assert "retryable" not in evaluation["questions"][0]
+
+
+async def test_intro_is_excluded_from_the_evaluation():
+    # Scoring "tell me about yourself" on correctness is meaningless, and a
+    # freebie in Coverage would flatter every Session (ADR 0015).
+    provider = FakeEvaluator()
+    graph = build_evaluator_graph(provider)
+    completed = [
+        {**make_record("Tell me about yourself"), "stage": "intro"},
+        {**make_record("Q1"), "stage": "warm_up"},
+    ]
+
+    evaluation = await evaluate_session(graph, "s1", "ml_genai", completed)
+
+    assert [q["question"] for q in evaluation["questions"]] == ["Q1"]
+    assert evaluation["coverage"] == {"answered": 1, "total": 1}
+    assert provider.scored_questions == ["Q1"]
