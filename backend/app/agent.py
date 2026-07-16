@@ -31,6 +31,7 @@ class InterviewState(TypedDict):
     current_question: dict
     follow_up_count: int
     current_answered: bool
+    current_answers: list[str]
     completed: list[dict]
     transcript: list[dict[str, str]]
     phase: str
@@ -53,6 +54,7 @@ def start_session(session_id: str, domain: str, seed: int | None = None) -> Inte
         current_question=current,
         follow_up_count=0,
         current_answered=True,
+        current_answers=[],
         completed=[],
         transcript=[{"role": "assistant", "content": current["question"]}],
         phase="asking",
@@ -63,8 +65,19 @@ def start_session(session_id: str, domain: str, seed: int | None = None) -> Inte
 
 
 def _close_out_current_question(state: InterviewState) -> list[dict]:
+    """Append the current question's result to `completed`.
+
+    Carries what the evaluator agent needs (ADR 0011): the question, its rubric
+    anchor (`follow_up_hints`), everything the Candidate said for it, and whether
+    it was ever really answered.
+    """
+    question = state["current_question"]
     record = {
-        "question": state["current_question"]["question"],
+        "question": question["question"],
+        "topic": question["topic"],
+        "difficulty": question["difficulty"],
+        "follow_up_hints": question["follow_up_hints"],
+        "answers": list(state["current_answers"]),
         "answered": state["current_answered"],
     }
     return [*state["completed"], record]
@@ -94,7 +107,13 @@ def build_graph(provider: LLMProvider):
         except ProviderMalformedError as exc:
             logger.warning("malformed judge response, defaulting to advance: %s", exc)
 
-        return {**state, "classification": classification, "reply": reply, "current_answered": answered}
+        return {
+            **state,
+            "classification": classification,
+            "reply": reply,
+            "current_answered": answered,
+            "current_answers": [*state["current_answers"], state["latest_answer"]],
+        }
 
     def route_after_judgment(state: InterviewState) -> str:
         if state["classification"] in ("probe", "clarify"):
@@ -162,6 +181,7 @@ def build_graph(provider: LLMProvider):
             "current_question": nxt,
             "follow_up_count": 0,
             "current_answered": True,
+            "current_answers": [],
             "transcript": transcript,
             "reply": f"{state['reply']} {nxt['question']}",
             "phase": "asking",

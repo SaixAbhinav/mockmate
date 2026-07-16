@@ -18,6 +18,8 @@ function App() {
   const [error, setError] = useState(null)
   const [voices, setVoices] = useState({})
   const [voice, setVoice] = useState('')
+  const [evaluation, setEvaluation] = useState(null)
+  const [evaluating, setEvaluating] = useState(false)
   const recorderRef = useRef(null)
   const chatEndRef = useRef(null)
 
@@ -35,6 +37,26 @@ function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [history, status])
+
+  // The Evaluation only exists once the Session is done.
+  useEffect(() => {
+    if (phase !== 'done' || !sessionId) return
+    const controller = new AbortController()
+    setEvaluating(true)
+    fetch(`/api/session/${sessionId}/evaluation`, { signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error(`evaluation failed (${r.status})`)
+        return r.json()
+      })
+      .then(setEvaluation)
+      .catch((err) => {
+        if (err.name !== 'AbortError') setError(String(err))
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setEvaluating(false)
+      })
+    return () => controller.abort()
+  }, [phase, sessionId])
 
   async function playAudio(audioB64) {
     setStatus('speaking')
@@ -76,6 +98,8 @@ function App() {
     setTotalQuestions(null)
     setError(null)
     setStatus('idle')
+    setEvaluation(null)
+    setEvaluating(false)
   }
 
   async function sendTranscript(transcript) {
@@ -252,6 +276,62 @@ function App() {
           </form>
         )}
       </section>
+
+      {done && evaluating && <p className="hint">Scoring your interview…</p>}
+
+      {done && evaluation && (
+        <section className="evaluation">
+          <h2>How you did</h2>
+          <p className="evaluation-assessment">{evaluation.assessment}</p>
+
+          <div className="chips">
+            <span className="score-chip coverage">
+              answered <strong>{evaluation.coverage.answered}</strong> of{' '}
+              {evaluation.coverage.total}
+            </span>
+            {Object.entries(evaluation.averages).map(([dimension, value]) => (
+              <span key={dimension} className="score-chip">
+                {dimension}: <strong>{value ?? '—'}</strong>/5
+              </span>
+            ))}
+          </div>
+
+          {evaluation.strengths.length > 0 && (
+            <>
+              <h3>Strengths</h3>
+              <ul>{evaluation.strengths.map((s, i) => <li key={i}>{s}</li>)}</ul>
+            </>
+          )}
+
+          {evaluation.improvements.length > 0 && (
+            <>
+              <h3>Work on</h3>
+              <ul>{evaluation.improvements.map((s, i) => <li key={i}>{s}</li>)}</ul>
+            </>
+          )}
+
+          <h3>Question by question</h3>
+          {evaluation.questions.map((q, i) => (
+            <div key={i} className="evaluation-question">
+              <p className="evaluation-question-text">{q.question}</p>
+              {q.skipped ? (
+                <p className="hint">Not answered</p>
+              ) : q.unscored ? (
+                <p className="hint">Couldn't be scored</p>
+              ) : (
+                <>
+                  <div className="chips">
+                    <span className="score-chip">correctness: <strong>{q.correctness}</strong>/5</span>
+                    <span className="score-chip">depth: <strong>{q.depth}</strong>/5</span>
+                    <span className="score-chip">clarity: <strong>{q.clarity}</strong>/5</span>
+                  </div>
+                  <p>{q.comment}</p>
+                </>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
 
       {error && <p className="error">{error}</p>}
     </main>

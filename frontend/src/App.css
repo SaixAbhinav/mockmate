@@ -129,3 +129,41 @@ button.recording {
   color: #888;
   font-style: italic;
 }
+
+.evaluation {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #555;
+  border-radius: 12px;
+  overflow-y: auto;
+}
+
+.evaluation h2 { margin: 0 0 0.5rem; }
+.evaluation h3 { margin: 1rem 0 0.5rem; font-size: 1rem; }
+
+.evaluation-assessment { line-height: 1.6; }
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.score-chip {
+  font-size: 0.85rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid #555;
+  border-radius: 999px;
+  color: #888;
+}
+
+.score-chip.coverage { border-color: #7ab; color: #7ab; }
+
+.evaluation-question {
+  border-top: 1px solid #333;
+  padding-top: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.evaluation-question-text { color: #7ab; margin: 0 0 0.25rem; }

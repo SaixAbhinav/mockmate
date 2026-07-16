@@ -195,3 +195,48 @@ async def test_unavailable_provider_propagates_and_does_not_advance():
         await submit_answer(graph, state, "my answer")
 
     assert state["current_question"] == first_question  # caller's state untouched
+
+
+async def test_completed_record_carries_question_metadata_and_answers():
+    provider = FakeProvider([Judgment("advance", "ok", True)])
+    graph = build_graph(provider)
+    state = start_session("s1", "ml_genai", seed=1)
+    first = state["current_question"]
+
+    state = await submit_answer(graph, state, "my answer")
+
+    record = state["completed"][0]
+    assert record["question"] == first["question"]
+    assert record["topic"] == first["topic"]
+    assert record["difficulty"] == first["difficulty"]
+    assert record["follow_up_hints"] == first["follow_up_hints"]
+    assert record["answers"] == ["my answer"]
+    assert record["answered"] is True
+
+
+async def test_completed_record_collects_every_answer_for_a_probed_question():
+    provider = FakeProvider(
+        [
+            Judgment("probe", "Say more?", False),
+            Judgment("advance", "Good.", True),
+        ]
+    )
+    graph = build_graph(provider)
+    state = start_session("s1", "ml_genai", seed=1)
+
+    state = await submit_answer(graph, state, "shallow")
+    state = await submit_answer(graph, state, "deeper")
+
+    assert state["completed"][0]["answers"] == ["shallow", "deeper"]
+
+
+async def test_answers_do_not_leak_between_questions():
+    provider = FakeProvider([Judgment("advance", "ok", True)])
+    graph = build_graph(provider)
+    state = start_session("s1", "ml_genai", seed=1)
+
+    state = await submit_answer(graph, state, "a1")
+    state = await submit_answer(graph, state, "a2")
+
+    assert state["completed"][0]["answers"] == ["a1"]
+    assert state["completed"][1]["answers"] == ["a2"]

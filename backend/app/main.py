@@ -8,6 +8,7 @@ Session state lives in an in-memory dict (ADR 0007): fine for anonymous,
 single-process demo traffic; orphaned sessions are known, deferred debt.
 """
 
+import asyncio
 import base64
 import logging
 import uuid
@@ -18,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .agent import InterviewState, start_session, submit_answer, build_graph
+from .evaluator import build_evaluator_graph, evaluate_session
 from .providers import ProviderUnavailableError, get_provider
 from .stt import SttUnavailableError, transcribe
 from .tts import DEFAULT_VOICE, VOICES, synthesize
@@ -38,6 +40,15 @@ app.add_middleware(
 SUPPORTED_DOMAINS = {"ml_genai"}
 
 _sessions: dict[str, InterviewState] = {}
+
+# Evaluations are cached per Session: the Evaluation is stable once a Session is
+# finished, and re-running it would re-bill nine LLM calls on every refresh.
+_evaluations: dict[str, dict] = {}
+
+# One lock per Session. The cache check straddles an await, so without this two
+# concurrent requests both miss and both score. React's <StrictMode> makes that a
+# certainty in dev, not a theoretical race.
+_evaluation_locks: dict[str, asyncio.Lock] = {}
 
 
 class CreateSessionRequest(BaseModel):
@@ -64,6 +75,34 @@ class AnswerResponse(BaseModel):
     phase: str
     question_number: int
     total_questions: int
+
+
+class QuestionScore(BaseModel):
+    question: str
+    topic: str
+    difficulty: str
+    correctness: int | None = None
+    depth: int | None = None
+    clarity: int | None = None
+    comment: str | None = None
+    skipped: bool = False
+    unscored: bool = False
+
+
+class Coverage(BaseModel):
+    answered: int
+    total: int
+
+
+class EvaluationResponse(BaseModel):
+    session_id: str
+    domain: str
+    averages: dict[str, float | None]
+    coverage: Coverage
+    assessment: str
+    strengths: list[str]
+    improvements: list[str]
+    questions: list[QuestionScore]
 
 
 def _progress(state: InterviewState) -> tuple[int, int]:
@@ -136,7 +175,7 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
         logger.warning("interviewer unavailable for session %s: %s", session_id, exc)
         raise HTTPException(
             status_code=503,
-            detail="the interviewer is temporarily unavailable — please try again",
+            detail="the AI provider is temporarily unavailable — please try again",
         ) from exc
     _sessions[session_id] = state
 
@@ -149,3 +188,30 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
         question_number=number,
         total_questions=total,
     )
+
+
+@app.get("/api/session/{session_id}/evaluation", response_model=EvaluationResponse)
+async def evaluation(session_id: str) -> EvaluationResponse:
+    state = _sessions.get(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="unknown session")
+    if state["phase"] != "done":
+        raise HTTPException(status_code=409, detail="the Session is not finished yet")
+
+    # setdefault does not await, so it is atomic on the event loop.
+    lock = _evaluation_locks.setdefault(session_id, asyncio.Lock())
+    async with lock:
+        if session_id in _evaluations:
+            result = _evaluations[session_id]
+        else:
+            graph = build_evaluator_graph(get_provider())
+            result = await evaluate_session(
+                graph, session_id, state["domain"], state["completed"]
+            )
+            # A transient provider failure (rate limit, timeout) should not be
+            # baked in forever — only cache once every Score/Assessment call
+            # either succeeded or failed deterministically (malformed).
+            if not result["retryable_failure"]:
+                _evaluations[session_id] = result
+
+    return EvaluationResponse(**{k: v for k, v in result.items() if k != "retryable_failure"})

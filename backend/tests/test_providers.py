@@ -4,6 +4,8 @@ import httpx
 import pytest
 
 from app.providers import (
+    AnswerScore,
+    Assessment,
     GeminiProvider,
     GroqProvider,
     Judgment,
@@ -168,3 +170,102 @@ def test_both_failure_types_are_provider_errors():
     # Callers that don't care which failure it was (the evaluator) catch the base.
     assert issubclass(ProviderMalformedError, ProviderError)
     assert issubclass(ProviderUnavailableError, ProviderError)
+
+
+async def test_scripted_provider_returns_neutral_scores():
+    provider = ScriptedProvider()
+    score = await provider.evaluate_answer(
+        question="Q", follow_up_hints=["h"], answers=["an answer"]
+    )
+    assert 1 <= score.correctness <= 5
+    assert 1 <= score.depth <= 5
+    assert 1 <= score.clarity <= 5
+    assert score.comment
+
+
+async def test_scripted_provider_returns_assessment():
+    provider = ScriptedProvider()
+    result = await provider.assess_session([{"question": "Q"}])
+    assert result.assessment
+    assert isinstance(result.strengths, list)
+    assert isinstance(result.improvements, list)
+
+
+async def test_groq_evaluate_answer_parses_valid_json(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response(
+            json.dumps({"correctness": 4, "depth": 3, "clarity": 5, "comment": "Solid."})
+        )
+    )
+    provider = GroqProvider(api_key="fake-key")
+    score = await provider.evaluate_answer(
+        question="What is overfitting?",
+        follow_up_hints=["ask about validation loss"],
+        answers=["It fits noise."],
+    )
+    assert score == AnswerScore(correctness=4, depth=3, clarity=5, comment="Solid.")
+
+
+async def test_groq_evaluate_answer_rejects_out_of_range_score(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response(
+            json.dumps({"correctness": 9, "depth": 3, "clarity": 5, "comment": "x"})
+        )
+    )
+    provider = GroqProvider(api_key="fake-key")
+    with pytest.raises(ProviderMalformedError):
+        await provider.evaluate_answer(question="Q", follow_up_hints=["h"], answers=["a"])
+
+
+async def test_groq_evaluate_answer_raises_on_malformed_json(fake_groq_client):
+    fake_groq_client.response = FakeResponse(groq_chat_response("not json"))
+    provider = GroqProvider(api_key="fake-key")
+    with pytest.raises(ProviderMalformedError):
+        await provider.evaluate_answer(question="Q", follow_up_hints=["h"], answers=["a"])
+
+
+async def test_groq_assess_session_parses_valid_json(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response(
+            json.dumps(
+                {
+                    "assessment": "Strong overall.",
+                    "strengths": ["clear"],
+                    "improvements": ["go deeper"],
+                }
+            )
+        )
+    )
+    provider = GroqProvider(api_key="fake-key")
+    result = await provider.assess_session(
+        [{"question": "Q", "correctness": 4, "depth": 3, "clarity": 5, "comment": "ok"}]
+    )
+    assert result == Assessment(
+        assessment="Strong overall.", strengths=["clear"], improvements=["go deeper"]
+    )
+
+
+async def test_groq_assess_session_raises_on_missing_field(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response(json.dumps({"assessment": "x"}))
+    )
+    provider = GroqProvider(api_key="fake-key")
+    with pytest.raises(ProviderMalformedError):
+        await provider.assess_session([{"question": "Q"}])
+
+
+async def test_groq_assess_session_raises_on_partial_score(fake_groq_client):
+    # correctness/depth/clarity present but comment missing: _assess_user_turn must
+    # treat this as "could not be scored" rather than raising a raw KeyError while
+    # building the prompt. The fake response below is itself malformed (mirrors
+    # test_groq_assess_session_raises_on_missing_field) so the only way this test
+    # can end up raising ProviderMalformedError is if control reaches the response
+    # parsing at all — proving _assess_user_turn didn't blow up first.
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response(json.dumps({"assessment": "x"}))
+    )
+    provider = GroqProvider(api_key="fake-key")
+    with pytest.raises(ProviderMalformedError):
+        await provider.assess_session(
+            [{"question": "Q", "correctness": 4, "depth": 3, "clarity": 5}]
+        )

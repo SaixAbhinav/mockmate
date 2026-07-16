@@ -6,10 +6,11 @@ interview-prep SaaS" genre, rebuilt as an open, self-hostable app.
 Speak your answers; an AI interviewer asks questions, probes follow-ups, and
 (soon) scores you against rubrics and targets your weak areas.
 
-**Status: interviewer agent.** A full mock interview runs end to end: pick a
-domain, work through a real question plan (ADR 0006), get probed or
-clarified on shallow/off-topic answers, and reach a wrap-up — voice in
-(MediaRecorder → server-side Groq Whisper), voice out (neural TTS).
+**Status: evaluator agent.** A full mock interview runs end to end — pick a
+domain, work through a question queue, get probed or clarified on shallow or
+off-topic answers, reach a wrap-up — and then get scored: every answer rated on
+correctness, depth, and clarity, with per-question feedback and an overall
+assessment.
 
 ## Run it
 
@@ -51,6 +52,8 @@ cd backend
 pip install -r requirements-dev.txt
 pytest
 ```
+
+61 passed.
 
 ## Design decisions
 
