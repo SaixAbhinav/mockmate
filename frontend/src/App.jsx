@@ -27,6 +27,7 @@ function App() {
   const [resumeStatus, setResumeStatus] = useState('none') // none | uploading | ready | failed
   const recorderRef = useRef(null)
   const chatEndRef = useRef(null)
+  const resumeUploadTokenRef = useRef(0)
 
   useEffect(() => {
     fetch('/api/voices')
@@ -114,6 +115,7 @@ function App() {
   async function handleResumeChange(e) {
     const file = e.target.files[0]
     if (!file) return
+    const token = ++resumeUploadTokenRef.current
     setResumeStatus('uploading')
     setError(null)
     try {
@@ -125,10 +127,12 @@ function App() {
         throw new Error(body.detail || `resume upload failed (${resp.status})`)
       }
       const data = await resp.json()
+      if (token !== resumeUploadTokenRef.current) return // a newer upload superseded this one
       setResumeId(data.resume_id)
       setResumeName(file.name)
       setResumeStatus('ready')
     } catch (err) {
+      if (token !== resumeUploadTokenRef.current) return // a newer upload superseded this one
       setResumeId(null)
       setResumeStatus('failed')
       setError(String(err))
