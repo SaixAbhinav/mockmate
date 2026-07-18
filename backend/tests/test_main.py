@@ -25,7 +25,7 @@ def test_create_session_returns_first_question(client):
     assert data["first_question"]
     assert data["audio_b64"]
     assert data["question_number"] == 1
-    assert data["total_questions"] == 4  # intro + 3 warm-up (ADR 0012)
+    assert data["total_questions"] == 6  # intro + 3 warm-up + 2 DSA (ADR 0012)
 
 
 def test_create_session_rejects_unknown_domain(client):
@@ -51,17 +51,23 @@ def test_answer_unknown_session_returns_404(client):
     assert resp.status_code == 404
 
 
+DSA_STUB_CODE = "x = 1"  # defines nothing; the run errors, but a Submission is a Submission
+
+
+def _drive_to_done(client, session_id):
+    for _ in range(30):
+        resp = client.post(f"/api/session/{session_id}/answer", json={"transcript": "answer"})
+        if resp.status_code == 409:  # DSA question awaiting code
+            client.post(f"/api/session/{session_id}/dsa/submit", json={"code": DSA_STUB_CODE})
+            continue
+        if resp.json()["phase"] == "done":
+            return
+    raise AssertionError("session never reached done")
+
+
 def test_full_session_reaches_done(client):
     session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
-    phase = "advancing"
-    for _ in range(20):
-        if phase == "done":
-            break
-        data = client.post(
-            f"/api/session/{session_id}/answer", json={"transcript": "answer"}
-        ).json()
-        phase = data["phase"]
-    assert phase == "done"
+    _drive_to_done(client, session_id)
 
 
 def test_turn_endpoint_removed(client):
@@ -86,12 +92,7 @@ def test_answer_returns_503_when_provider_unavailable(client, monkeypatch):
 
 def _finish_session(client) -> str:
     session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
-    for _ in range(20):
-        data = client.post(
-            f"/api/session/{session_id}/answer", json={"transcript": "answer"}
-        ).json()
-        if data["phase"] == "done":
-            break
+    _drive_to_done(client, session_id)
     return session_id
 
 
@@ -175,9 +176,12 @@ async def test_concurrent_evaluation_requests_score_only_once(monkeypatch, anyio
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         sid = (await ac.post("/api/session", json={"domain": "ml_genai"})).json()["session_id"]
-        for _ in range(20):
-            data = (await ac.post(f"/api/session/{sid}/answer", json={"transcript": "a"})).json()
-            if data["phase"] == "done":
+        for _ in range(30):
+            resp = await ac.post(f"/api/session/{sid}/answer", json={"transcript": "a"})
+            if resp.status_code == 409:
+                await ac.post(f"/api/session/{sid}/dsa/submit", json={"code": "x = 1"})
+                continue
+            if resp.json()["phase"] == "done":
                 break
 
         first, second = await asyncio.gather(
@@ -285,7 +289,7 @@ def test_session_with_resume_uses_generated_warm_up(client, monkeypatch):
         "/api/session", json={"domain": "ml_genai", "resume_id": resume_id}
     ).json()
 
-    assert data["total_questions"] == 3  # intro + the 2 generated questions
+    assert data["total_questions"] == 5  # intro + 2 generated + 2 DSA
     assert data["warm_up_source"] == "resume"
 
 
@@ -305,5 +309,129 @@ def test_session_falls_back_to_bank_when_generation_fails(client, monkeypatch):
 
     assert resp.status_code == 200  # a failed generation never blocks a Session
     data = resp.json()
-    assert data["total_questions"] == 4  # intro + 3 curated
+    assert data["total_questions"] == 6  # intro + 3 curated + 2 DSA
     assert data["warm_up_source"] == "bank"  # degradation is labeled, never silent
+
+
+# --- The DSA round's endpoints (ADR 0017) ---
+
+from app.questions import DsaQuestion
+
+ECHO_DSA_QUESTION = DsaQuestion(
+    domain="dsa",
+    topic="warmup",
+    difficulty="easy",
+    question="Implement echo: return the argument unchanged.",
+    follow_up_hints=["Ask about the identity function"],
+    function_name="echo",
+    signature="def echo(x):",
+    starter_code="def echo(x):\n    pass\n",
+    test_cases=[{"args": [1], "expected": 1}, {"args": ["a"], "expected": "a"}],
+)
+
+ECHO_SOLUTION = "def echo(x):\n    return x\n"
+
+
+def _reach_dsa(client, monkeypatch):
+    """Start a Session whose single DSA question is the fixed echo question,
+    then answer through intro + warm-up until it is current."""
+    monkeypatch.setattr("app.agent.plan_dsa", lambda **kwargs: [ECHO_DSA_QUESTION])
+    session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
+    for _ in range(4):  # intro + 3 curated warm-ups, scripted provider advances each
+        data = client.post(
+            f"/api/session/{session_id}/answer", json={"transcript": "answer"}
+        ).json()
+    assert data["stage"] == "dsa"
+    assert data["dsa"]["function_name"] == "echo"
+    assert data["dsa"]["starter_code"]
+    return session_id
+
+
+def test_run_executes_code_against_the_test_cases(client, monkeypatch):
+    session_id = _reach_dsa(client, monkeypatch)
+
+    resp = client.post(f"/api/session/{session_id}/dsa/run", json={"code": ECHO_SOLUTION})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert (data["passed"], data["total"]) == (2, 2)
+    assert data["results"][0]["passed"] is True
+
+
+def test_run_outside_the_dsa_stage_returns_409(client):
+    session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
+
+    resp = client.post(f"/api/session/{session_id}/dsa/run", json={"code": "x = 1"})
+
+    assert resp.status_code == 409
+
+
+def test_answer_during_dsa_before_submit_returns_409(client, monkeypatch):
+    session_id = _reach_dsa(client, monkeypatch)
+
+    resp = client.post(f"/api/session/{session_id}/answer", json={"transcript": "talk"})
+
+    assert resp.status_code == 409
+
+
+def test_submit_returns_reaction_and_opens_the_discussion(client, monkeypatch):
+    session_id = _reach_dsa(client, monkeypatch)
+
+    resp = client.post(f"/api/session/{session_id}/dsa/submit", json={"code": ECHO_SOLUTION})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reply"]
+    assert data["audio_b64"]
+    assert data["phase"] == "probing"
+    assert data["stage"] == "dsa"
+    assert data["run"]["passed"] == 2
+
+    # The spoken discussion now flows through the normal answer endpoint …
+    followed = client.post(f"/api/session/{session_id}/answer", json={"transcript": "I returned x."})
+    assert followed.status_code == 200
+    assert followed.json()["phase"] == "done"  # only 1 DSA question in this fixture
+
+
+def test_second_submit_for_the_same_question_returns_409(client, monkeypatch):
+    session_id = _reach_dsa(client, monkeypatch)
+    client.post(f"/api/session/{session_id}/dsa/submit", json={"code": ECHO_SOLUTION})
+
+    resp = client.post(f"/api/session/{session_id}/dsa/submit", json={"code": ECHO_SOLUTION})
+
+    assert resp.status_code == 409
+
+
+def test_failed_reaction_leaves_the_session_untouched(client, monkeypatch):
+    """The ordering guarantee at the heart of ADR 0017: run, then react, then
+    mutate. A provider failure between run and react must leave the Session
+    exactly as it was — no Submission recorded, /answer still 409s, and a
+    retry with a working provider succeeds as if the failed attempt never
+    happened."""
+    from app import main as main_module
+    from app.providers import ProviderUnavailableError
+
+    session_id = _reach_dsa(client, monkeypatch)
+    real_get_provider = main_module.get_provider
+
+    class FailingReactionProvider:
+        name = "fake"
+
+        async def react_to_code(self, question, code, results_summary):
+            raise ProviderUnavailableError("rate limited")
+
+    monkeypatch.setattr(main_module, "get_provider", lambda: FailingReactionProvider())
+
+    failed = client.post(f"/api/session/{session_id}/dsa/submit", json={"code": ECHO_SOLUTION})
+    assert failed.status_code == 503
+
+    # No Submission was attached: /answer still refuses to accept a spoken turn.
+    blocked = client.post(f"/api/session/{session_id}/answer", json={"transcript": "talk"})
+    assert blocked.status_code == 409
+
+    # Restore a working provider and retry — the failed attempt cost nothing.
+    monkeypatch.setattr(main_module, "get_provider", real_get_provider)
+    retried = client.post(f"/api/session/{session_id}/dsa/submit", json={"code": ECHO_SOLUTION})
+    assert retried.status_code == 200
+    assert retried.json()["run"]["passed"] == 2
