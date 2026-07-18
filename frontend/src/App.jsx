@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import CodeMirror from '@uiw/react-codemirror'
+import { python } from '@codemirror/lang-python'
 import './App.css'
 
 // Domain picker (ML/GenAI only for v1, ADR 0008).
@@ -25,6 +27,11 @@ function App() {
   const [resumeId, setResumeId] = useState(null)
   const [resumeName, setResumeName] = useState('')
   const [resumeStatus, setResumeStatus] = useState('none') // none | uploading | ready | failed
+  const [dsa, setDsa] = useState(null) // DsaPayload for the current coding question
+  const [code, setCode] = useState('')
+  const [runReport, setRunReport] = useState(null)
+  const [dsaSubmitted, setDsaSubmitted] = useState(false)
+  const [running, setRunning] = useState(false)
   const recorderRef = useRef(null)
   const chatEndRef = useRef(null)
   const resumeUploadTokenRef = useRef(0)
@@ -112,6 +119,10 @@ function App() {
     setEvaluating(false)
     setStage(null)
     setWarmUpSource(null)
+    setDsa(null)
+    setCode('')
+    setRunReport(null)
+    setDsaSubmitted(false)
   }
 
   async function handleResumeChange(e) {
@@ -141,6 +152,22 @@ function App() {
     }
   }
 
+  // Every advancing response can move the interview onto (or off) a coding
+  // question; the editor state follows the dsa payload.
+  function applyProgress(data) {
+    setPhase(data.phase)
+    setQuestionNumber(data.question_number)
+    setTotalQuestions(data.total_questions)
+    setStage(data.stage)
+    const payload = data.dsa ?? null
+    setDsa(payload)
+    if (payload) {
+      setCode(payload.starter_code)
+      setRunReport(null)
+      setDsaSubmitted(false)
+    }
+  }
+
   async function sendTranscript(transcript) {
     const text = transcript.trim()
     if (!text || !sessionId) return
@@ -159,13 +186,53 @@ function App() {
       const data = await resp.json()
       setLatencyMs(Math.round(performance.now() - t0))
       setHistory([...newHistory, { role: 'assistant', content: data.reply }])
+      applyProgress(data)
+      await playAudio(data.audio_b64)
+    } catch (err) {
+      setHistory(history) // roll back the optimistic append so a failed turn leaves no orphan message
+      setError(String(err))
+      setStatus('idle')
+    }
+  }
+
+  async function runCode() {
+    setRunning(true)
+    setError(null)
+    try {
+      const resp = await fetch(`/api/session/${sessionId}/dsa/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      })
+      if (!resp.ok) throw new Error(`run failed (${resp.status})`)
+      setRunReport(await resp.json())
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  async function submitCode() {
+    setStatus('thinking')
+    setError(null)
+    try {
+      const resp = await fetch(`/api/session/${sessionId}/dsa/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, voice }),
+      })
+      if (!resp.ok) throw new Error(`submit failed (${resp.status})`)
+      const data = await resp.json()
+      setRunReport(data.run)
+      setDsaSubmitted(true)
+      setHistory((h) => [...h, { role: 'assistant', content: data.reply }])
       setPhase(data.phase)
       setQuestionNumber(data.question_number)
       setTotalQuestions(data.total_questions)
       setStage(data.stage)
       await playAudio(data.audio_b64)
     } catch (err) {
-      setHistory(history) // roll back the optimistic append so a failed turn leaves no orphan message
       setError(String(err))
       setStatus('idle')
     }
@@ -255,7 +322,7 @@ function App() {
   }
 
   const done = phase === 'done'
-  const STAGE_LABELS = { intro: 'intro', warm_up: 'warm-up' }
+  const STAGE_LABELS = { intro: 'intro', warm_up: 'warm-up', dsa: 'coding' }
   const progressLabel = questionNumber && totalQuestions
     ? `${STAGE_LABELS[stage] ? STAGE_LABELS[stage] + ' · ' : ''}` +
       `question ${questionNumber} of ${totalQuestions}` +
@@ -308,6 +375,45 @@ function App() {
             <button type="button" onClick={startNewInterview}>
               Start new interview
             </button>
+          </div>
+        ) : dsa && !dsaSubmitted ? (
+          <div className="dsa-pane">
+            <p className="dsa-signature"><code>{dsa.signature}</code></p>
+            <CodeMirror
+              value={code}
+              height="220px"
+              extensions={[python()]}
+              onChange={setCode}
+            />
+            <div className="dsa-actions">
+              <button type="button" onClick={runCode} disabled={running || status === 'thinking'}>
+                {running ? 'Running…' : '▶ Run tests'}
+              </button>
+              <button
+                type="button"
+                onClick={submitCode}
+                disabled={running || status === 'thinking'}
+              >
+                {status === 'thinking' ? 'Submitting…' : 'Submit'}
+              </button>
+            </div>
+            {runReport && (
+              <div className="dsa-results">
+                {runReport.status === 'ok' ? (
+                  <p>
+                    <strong>{runReport.passed}</strong> of {runReport.total} test cases passed
+                  </p>
+                ) : (
+                  <p className="error">{runReport.error}</p>
+                )}
+                {runReport.results.filter((r) => !r.passed).map((r, i) => (
+                  <p key={i} className="dsa-fail">
+                    args: <code>{JSON.stringify(r.args)}</code> · expected{' '}
+                    <code>{JSON.stringify(r.expected)}</code> · got <code>{r.got}</code>
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <form onSubmit={handleTextSubmit} className="composer">
