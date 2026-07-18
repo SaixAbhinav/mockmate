@@ -182,7 +182,11 @@ def _stage(state: InterviewState) -> str:
 
 def _dsa_payload(state: InterviewState) -> DsaPayload | None:
     question = state["current_question"]
-    if state["phase"] == "done" or question.get("stage") != "dsa":
+    if (
+        state["phase"] == "done"
+        or question.get("stage") != "dsa"
+        or "submission" in question
+    ):
         return None
     return DsaPayload(
         function_name=question["function_name"],

@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.providers import ProviderUnavailableError
+from app.providers import ProviderUnavailableError, Judgment
 
 
 @pytest.fixture
@@ -435,3 +435,52 @@ def test_failed_reaction_leaves_the_session_untouched(client, monkeypatch):
     retried = client.post(f"/api/session/{session_id}/dsa/submit", json={"code": ECHO_SOLUTION})
     assert retried.status_code == 200
     assert retried.json()["run"]["passed"] == 2
+
+
+def test_dsa_payload_hidden_after_submission_with_probe_response(client, monkeypatch):
+    """After submitting DSA code, if the post-submit discussion receives a 'probe'
+    classification (not 'advance'), the editor must remain closed (dsa: null).
+
+    The bug: _dsa_payload only checked stage != "dsa", not whether a submission
+    existed. During probing/clarifying after submit, stage stayed "dsa" and the
+    payload would reappear, reopening the editor mid-discussion.
+    """
+    from app import main as main_module
+
+    session_id = _reach_dsa(client, monkeypatch)
+
+    # Submit code successfully
+    submit_resp = client.post(
+        f"/api/session/{session_id}/dsa/submit", json={"code": ECHO_SOLUTION}
+    )
+    assert submit_resp.status_code == 200
+    assert submit_resp.json()["phase"] == "probing"
+
+    # Now provide a judge that classifies the next response as "probe" (not "advance")
+    # This keeps phase as "probing" and stage as "dsa", with submission persisting
+    class ProbeProvider:
+        name = "fake"
+
+        async def judge_answer(
+            self, question: str, follow_up_hints: list[str], history: list, answer: str
+        ) -> Judgment:
+            return Judgment(
+                classification="probe",
+                reply="Can you tell me more about that?",
+                answered=True,
+            )
+
+    monkeypatch.setattr(main_module, "get_provider", lambda: ProbeProvider())
+
+    # Call /answer during the probing phase
+    answer_resp = client.post(
+        f"/api/session/{session_id}/answer", json={"transcript": "I returned x."}
+    )
+
+    assert answer_resp.status_code == 200
+    data = answer_resp.json()
+    # The bug would have dsa != None here; the fix should return dsa: null
+    assert data["dsa"] is None, (
+        "After submitting DSA code, the editor should close even during "
+        "post-submit probe/clarify discussion"
+    )
