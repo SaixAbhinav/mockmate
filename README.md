@@ -9,9 +9,11 @@ Speak your answers; an AI interviewer asks questions, probes follow-ups, and
 **Status: phased interview.** A Session now runs like a real interview's
 opening: a "tell me about yourself" intro, then a warm-up round grounded in
 your uploaded resume (PDF or text, optional) — with probing and clarifying
-follow-ups throughout — then a wrap-up and a scored Evaluation. The live
-DSA coding round (ADR 0012) is next. With both a Groq and a Gemini key
-configured, provider failures fail over automatically.
+follow-ups throughout — then a coding round (2 Python questions run against
+test cases in a sandboxed subprocess; the interviewer reacts to the results
+and probes your approach), then a wrap-up and a scored Evaluation. With both
+a Groq and a Gemini key configured, provider failures fail over
+automatically.
 
 ## Run it
 
@@ -56,7 +58,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-97 passed.
+127 passed.
 
 ## Design decisions
 
