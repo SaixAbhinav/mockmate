@@ -1,12 +1,13 @@
 import pytest
 
-from app.agent import build_graph, start_session, submit_answer
+from app.agent import build_graph, start_session, submit_answer, submit_code
 from app.providers import (
     Judgment,
     ProviderMalformedError,
     ProviderUnavailableError,
     ScriptedProvider,
 )
+from app.runner import RunResult, TestCaseResult
 
 pytestmark = pytest.mark.anyio
 
@@ -257,16 +258,18 @@ async def test_generated_warm_up_questions_fill_the_queue():
 
     state = start_session("s1", "ml_genai", seed=1, warm_up_questions=generated)
 
-    assert [q["question"] for q in state["queue"]] == ["GQ1", "GQ2"]
-    assert all(q["stage"] == "warm_up" for q in state["queue"])
-    assert all(q["domain"] == "ml_genai" for q in state["queue"])
+    assert len(state["queue"]) == 4  # 2 generated warm-ups + 2 DSA (ADR 0012)
+    assert [q["question"] for q in state["queue"][:2]] == ["GQ1", "GQ2"]
+    assert all(q["stage"] == "warm_up" for q in state["queue"][:2])
+    assert all(q["domain"] == "ml_genai" for q in state["queue"][:2])
+    assert [q["stage"] for q in state["queue"][-2:]] == ["dsa", "dsa"]
 
 
 async def test_curated_fallback_fills_the_queue_when_no_generated_questions():
     state = start_session("s1", "ml_genai", seed=1)
 
-    assert len(state["queue"]) == 3  # intro is current; 3 curated warm-ups queued
-    assert all(q["stage"] == "warm_up" for q in state["queue"])
+    assert len(state["queue"]) == 5  # 3 curated warm-ups + 2 DSA (ADR 0012)
+    assert all(q["stage"] == "warm_up" for q in state["queue"][:3])
 
 
 async def test_completed_records_carry_stage():
@@ -279,7 +282,7 @@ async def test_completed_records_carry_stage():
     assert state["completed"][0]["stage"] == "intro"
 
 
-async def test_session_wraps_after_warm_up():
+async def test_session_wraps_after_the_dsa_round():
     provider = FakeProvider([Judgment("advance", "ok", True)])
     graph = build_graph(provider)
     state = start_session("s1", "ml_genai", seed=1)
@@ -289,4 +292,55 @@ async def test_session_wraps_after_warm_up():
         state = await submit_answer(graph, state, "answer")
         answers += 1
 
-    assert answers == 4  # intro + 3 warm-up; the DSA round arrives on Day 5 (ADR 0012)
+    assert answers == 6  # intro + 3 warm-up + 2 DSA (ADR 0012)
+
+
+def _fast_forward_to_dsa(state):
+    """Make the last queued (DSA) question current, with an empty queue."""
+    dsa_question = state["queue"][-1]
+    return {**state, "current_question": dsa_question, "queue": []}
+
+
+async def test_queue_ends_with_two_dsa_questions():
+    state = start_session("s1", "ml_genai", seed=1)
+
+    dsa_entries = [q for q in state["queue"] if q["stage"] == "dsa"]
+    assert len(state["queue"]) == 5  # 3 warm-up + 2 DSA (ADR 0012)
+    assert [q["stage"] for q in state["queue"][-2:]] == ["dsa", "dsa"]
+    assert dsa_entries[0]["difficulty"] == "easy"
+    for q in dsa_entries:
+        assert q["function_name"] and q["starter_code"] and q["test_cases"]
+
+
+async def test_submit_code_attaches_submission_and_opens_discussion():
+    state = _fast_forward_to_dsa(start_session("s1", "ml_genai", seed=1))
+    run_result = RunResult(
+        status="ok",
+        error=None,
+        results=[TestCaseResult(args=[1], expected=1, got="1", passed=True)],
+    )
+
+    state = submit_code(state, "def f(x):\n    return x\n", run_result, "Nice. Why this way?")
+
+    submission = state["current_question"]["submission"]
+    assert submission["code"].startswith("def f")
+    assert submission["status"] == "ok"
+    assert (submission["passed"], submission["total"]) == (1, 1)
+    assert state["phase"] == "probing"
+    assert state["reply"] == "Nice. Why this way?"
+    assert state["transcript"][-1] == {"role": "assistant", "content": "Nice. Why this way?"}
+    assert "def f" in state["transcript"][-2]["content"]
+
+
+async def test_completed_record_carries_the_submission():
+    provider = FakeProvider([Judgment("advance", "ok", True)])
+    graph = build_graph(provider)
+    state = _fast_forward_to_dsa(start_session("s1", "ml_genai", seed=1))
+    run_result = RunResult(status="ok", error=None, results=[])
+    state = submit_code(state, "code", run_result, "reaction")
+
+    state = await submit_answer(graph, state, "I used a running total.")
+
+    assert state["phase"] == "done"  # queue was empty, so the Session wraps
+    assert state["completed"][-1]["submission"]["code"] == "code"
+    assert "submission" not in state["completed"][0] if len(state["completed"]) > 1 else True
