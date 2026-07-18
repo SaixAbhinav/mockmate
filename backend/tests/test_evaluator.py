@@ -205,3 +205,22 @@ async def test_intro_is_excluded_from_the_evaluation():
     assert [q["question"] for q in evaluation["questions"]] == ["Q1"]
     assert evaluation["coverage"] == {"answered": 1, "total": 1}
     assert provider.scored_questions == ["Q1"]
+
+
+async def test_dsa_round_is_excluded_from_the_evaluation():
+    # The rubric scores spoken answers (correctness/depth/clarity of speech);
+    # scoring code with it is meaningless, and ADR 0012 defers DSA scoring
+    # to its own day. The submission stays on the record for that day.
+    provider = FakeEvaluator()
+    graph = build_evaluator_graph(provider)
+    completed = [
+        {**make_record("Tell me about yourself"), "stage": "intro"},
+        {**make_record("Q1"), "stage": "warm_up"},
+        {**make_record("Implement running_sum"), "stage": "dsa"},
+    ]
+
+    evaluation = await evaluate_session(graph, "s1", "ml_genai", completed)
+
+    assert [q["question"] for q in evaluation["questions"]] == ["Q1"]
+    assert evaluation["coverage"] == {"answered": 1, "total": 1}
+    assert provider.scored_questions == ["Q1"]
