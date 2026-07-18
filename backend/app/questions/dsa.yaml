@@ -1,0 +1,144 @@
+# DSA question bank (ADR 0012/0016): the coding round. Extends the ADR 0003
+# schema with function_name, signature, starter_code, and test_cases.
+# Every test case must have exactly one correct output - the runner compares
+# with ==. difficulty: easy | medium | hard.
+
+- domain: dsa
+  topic: arrays
+  difficulty: easy
+  question: "Let's write some code. Implement running_sum: given a list of integers, return a new list where element i is the sum of the first i plus one input elements."
+  follow_up_hints:
+    - "Ask about the time and space complexity"
+    - "Ask whether it could be done in place"
+  function_name: running_sum
+  signature: "def running_sum(nums: list[int]) -> list[int]:"
+  starter_code: |
+    def running_sum(nums):
+        # your code here
+        pass
+  test_cases:
+    - args: [[1, 2, 3, 4]]
+      expected: [1, 3, 6, 10]
+    - args: [[5]]
+      expected: [5]
+    - args: [[-1, 1, -1]]
+      expected: [-1, 0, -1]
+    - args: [[]]
+      expected: []
+
+- domain: dsa
+  topic: strings
+  difficulty: easy
+  question: "Implement is_palindrome: given a string, return True if it reads the same forwards and backwards considering only alphanumeric characters and ignoring case."
+  follow_up_hints:
+    - "Ask why they chose their character-filtering approach"
+    - "Ask about the two-pointer alternative and its space usage"
+  function_name: is_palindrome
+  signature: "def is_palindrome(s: str) -> bool:"
+  starter_code: |
+    def is_palindrome(s):
+        # your code here
+        pass
+  test_cases:
+    - args: ["A man, a plan, a canal: Panama"]
+      expected: true
+    - args: ["race a car"]
+      expected: false
+    - args: [""]
+      expected: true
+    - args: ["0P"]
+      expected: false
+
+- domain: dsa
+  topic: strings
+  difficulty: easy
+  question: "Implement count_vowels: given a string, return how many characters are vowels - a, e, i, o, or u - counting both upper and lower case."
+  follow_up_hints:
+    - "Ask about the complexity and whether a set helps"
+    - "Ask how they would extend it to count each vowel separately"
+  function_name: count_vowels
+  signature: "def count_vowels(s: str) -> int:"
+  starter_code: |
+    def count_vowels(s):
+        # your code here
+        pass
+  test_cases:
+    - args: ["interview"]
+      expected: 4
+    - args: ["rhythm"]
+      expected: 0
+    - args: ["AEIOU"]
+      expected: 5
+    - args: [""]
+      expected: 0
+
+- domain: dsa
+  topic: stacks
+  difficulty: medium
+  question: "Implement is_balanced: given a string containing only round, square, and curly brackets, return True if every bracket is closed by the matching bracket in the correct order."
+  follow_up_hints:
+    - "Ask why a stack is the natural structure here"
+    - "Ask what happens with an unmatched opening bracket at the end"
+  function_name: is_balanced
+  signature: "def is_balanced(s: str) -> bool:"
+  starter_code: |
+    def is_balanced(s):
+        # your code here
+        pass
+  test_cases:
+    - args: ["()[]{}"]
+      expected: true
+    - args: ["(]"]
+      expected: false
+    - args: ["([{}])"]
+      expected: true
+    - args: [""]
+      expected: true
+    - args: ["(("]
+      expected: false
+
+- domain: dsa
+  topic: arrays
+  difficulty: medium
+  question: "Implement merge_sorted: given two lists of integers that are each already sorted ascending, return one merged sorted list containing all elements from both."
+  follow_up_hints:
+    - "Ask why sorting the concatenation would be wasteful"
+    - "Ask about the two-pointer walk and its complexity"
+  function_name: merge_sorted
+  signature: "def merge_sorted(a: list[int], b: list[int]) -> list[int]:"
+  starter_code: |
+    def merge_sorted(a, b):
+        # your code here
+        pass
+  test_cases:
+    - args: [[1, 3, 5], [2, 4, 6]]
+      expected: [1, 2, 3, 4, 5, 6]
+    - args: [[], [1, 2]]
+      expected: [1, 2]
+    - args: [[1, 1], [1]]
+      expected: [1, 1, 1]
+    - args: [[], []]
+      expected: []
+
+- domain: dsa
+  topic: dynamic-programming
+  difficulty: hard
+  question: "Implement max_subarray_sum: given a non-empty list of integers, return the largest sum of any contiguous subarray."
+  follow_up_hints:
+    - "Ask them to explain the running-best idea in Kadane's algorithm"
+    - "Ask what changes if the list is all negative numbers"
+  function_name: max_subarray_sum
+  signature: "def max_subarray_sum(nums: list[int]) -> int:"
+  starter_code: |
+    def max_subarray_sum(nums):
+        # your code here
+        pass
+  test_cases:
+    - args: [[-2, 1, -3, 4, -1, 2, 1, -5, 4]]
+      expected: 6
+    - args: [[1]]
+      expected: 1
+    - args: [[-3, -1, -2]]
+      expected: -1
+    - args: [[5, 4, -1, 7, 8]]
+      expected: 23
