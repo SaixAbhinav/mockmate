@@ -315,6 +315,9 @@ class OneSidedProvider:
             ],
         )
 
+    async def react_to_code(self, question, code, results_summary):
+        return await self._respond("react_to_code", f"{self.name} reaction")
+
 
 async def test_failover_returns_primary_result_without_touching_secondary():
     primary, secondary = OneSidedProvider("primary"), OneSidedProvider("secondary")
@@ -461,3 +464,37 @@ async def test_failover_delegates_generate_warm_up_questions():
     questions = await provider.generate_warm_up_questions(resume_text="r", domain="ml_genai")
 
     assert questions[0]["question"] == "secondary Q"
+
+
+# --- DSA code reaction (ADR 0017) ---
+
+
+async def test_scripted_provider_reaction_asks_about_the_approach():
+    provider = ScriptedProvider()
+
+    reaction = await provider.react_to_code("Q", "def f(): pass", "0 of 2 test cases passed.")
+
+    assert "approach" in reaction.lower()
+
+
+async def test_groq_react_to_code_returns_plain_text(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response("Nice - all tests pass. Why a set here?")
+    )
+    provider = GroqProvider(api_key="fake-key")
+
+    reaction = await provider.react_to_code("Q", "def f(): pass", "2 of 2 test cases passed.")
+
+    assert reaction == "Nice - all tests pass. Why a set here?"
+
+
+async def test_failover_delegates_react_to_code():
+    primary = OneSidedProvider("primary", error=ProviderUnavailableError("429"))
+    secondary = OneSidedProvider("secondary")
+    provider = FailoverProvider(primary, secondary)
+
+    reaction = await provider.react_to_code(
+        question="Q", code="def f(): pass", results_summary="summary"
+    )
+
+    assert reaction == "secondary reaction"
