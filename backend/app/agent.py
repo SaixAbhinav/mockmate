@@ -17,7 +17,8 @@ from typing import TypedDict
 from langgraph.graph import END, StateGraph
 
 from .providers import LLMProvider, ProviderMalformedError
-from .questions import Question, plan_warm_up
+from .questions import Question, plan_dsa, plan_warm_up
+from .runner import RunResult, summarize_run
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,9 @@ def start_session(
     `warm_up_questions` are resume-grounded questions from the provider (the
     ADR 0003 shape minus domain, stamped here). When absent - no resume, no
     key, or generation failed - the warm-up falls back to a curated draw from
-    the domain bank. The DSA stage arrives on Day 5 (ADR 0012).
+    the domain bank. The DSA round follows the warm-up: 2 curated coding
+    questions whose answers arrive through the submit endpoint, not the
+    microphone (ADR 0017).
     """
     if warm_up_questions:
         warm_up = [{**q, "domain": domain, "stage": "warm_up"} for q in warm_up_questions]
@@ -82,7 +85,8 @@ def start_session(
             {**_question_to_dict(q), "stage": "warm_up"}
             for q in plan_warm_up(domain, seed=seed)
         ]
-    queue = [dict(INTRO_QUESTION), *warm_up]
+    dsa = [{**asdict(q), "stage": "dsa"} for q in plan_dsa(seed=seed)]
+    queue = [dict(INTRO_QUESTION), *warm_up, *dsa]
     current = queue.pop(0)
     return InterviewState(
         session_id=session_id,
@@ -99,6 +103,42 @@ def start_session(
         reply=current["question"],
         classification="",
     )
+
+
+def submit_code(
+    state: InterviewState, code: str, run_result: RunResult, reaction: str
+) -> InterviewState:
+    """Attach the Candidate's Submission to the current DSA question and open
+    the discussion (ADR 0017).
+
+    The code and test summary enter the transcript as the Candidate's turn and
+    the interviewer's reaction follows it, so the judge's probes on the spoken
+    discussion are grounded in the actual code. The follow-up conversation
+    then runs through the normal graph via the answer endpoint.
+    """
+    summary = summarize_run(run_result)
+    question = {
+        **state["current_question"],
+        "submission": {
+            "code": code,
+            "status": run_result.status,
+            "passed": sum(1 for r in run_result.results if r.passed),
+            "total": len(run_result.results),
+        },
+    }
+    transcript = [
+        *state["transcript"],
+        {"role": "user", "content": f"Here is my submitted code:\n{code}\n\nTest results: {summary}"},
+        {"role": "assistant", "content": reaction},
+    ]
+    return {
+        **state,
+        "current_question": question,
+        "transcript": transcript,
+        "current_answered": True,
+        "reply": reaction,
+        "phase": "probing",
+    }
 
 
 def _close_out_current_question(state: InterviewState) -> list[dict]:
@@ -118,6 +158,8 @@ def _close_out_current_question(state: InterviewState) -> list[dict]:
         "answers": list(state["current_answers"]),
         "answered": state["current_answered"],
     }
+    if "submission" in question:
+        record["submission"] = question["submission"]
     return [*state["completed"], record]
 
 

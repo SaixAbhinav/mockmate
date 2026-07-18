@@ -149,9 +149,10 @@ async def evaluate_session(
     compiled_graph, session_id: str, domain: str, completed: list[dict]
 ) -> dict:
     """Run the evaluation pass and return the Candidate-facing Evaluation."""
-    # The intro is an ice-breaker, not a scored question (ADR 0015). Records
+    # The intro is an ice-breaker and the DSA round is scored by a future
+    # code-aware evaluator, not this speech rubric (ADR 0015/0017). Records
     # without a stage predate the phased Session and are all real questions.
-    completed = [r for r in completed if r.get("stage") != "intro"]
+    completed = [r for r in completed if r.get("stage") not in ("intro", "dsa")]
     result = await compiled_graph.ainvoke(
         {
             "session_id": session_id,

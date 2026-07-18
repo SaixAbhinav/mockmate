@@ -3,6 +3,8 @@
 POST /api/session                    -> starts a Session, returns Q1
 POST /api/transcribe   (audio file)  -> {transcript}
 POST /api/session/{id}/answer        -> judges the answer, advances the Session
+POST /api/session/{id}/dsa/run       -> runs candidate code against test cases
+POST /api/session/{id}/dsa/submit    -> submits code, gets the interviewer's reaction
 
 Session state lives in an in-memory dict (ADR 0007): fine for anonymous,
 single-process demo traffic; orphaned sessions are known, deferred debt.
@@ -16,12 +18,13 @@ import uuid
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from .agent import InterviewState, start_session, submit_answer, build_graph
+from .agent import InterviewState, start_session, submit_answer, submit_code, build_graph
 from .evaluator import build_evaluator_graph, evaluate_session
 from .providers import ProviderError, ProviderUnavailableError, get_provider
 from .resume import ResumeError, extract_resume_text
+from .runner import RunResult, run_tests, summarize_run
 from .stt import SttUnavailableError, transcribe
 from .tts import DEFAULT_VOICE, VOICES, synthesize
 
@@ -84,6 +87,52 @@ class AnswerResponse(BaseModel):
     question_number: int
     total_questions: int
     stage: str
+    dsa: "DsaPayload | None" = None
+
+
+MAX_CODE_CHARS = 10_000  # a coding-exercise solution, not a novel (TPM guard, ADR 0017)
+
+
+class DsaPayload(BaseModel):
+    """What the editor needs to render a DSA question."""
+
+    function_name: str
+    signature: str
+    starter_code: str
+    test_cases: list[dict]
+
+
+class TestCaseReport(BaseModel):
+    args: list
+    expected: object = None
+    got: str
+    passed: bool
+
+
+class RunReport(BaseModel):
+    status: str  # "ok" | "error" | "timeout"
+    error: str | None = None
+    passed: int
+    total: int
+    results: list[TestCaseReport]
+
+
+class DsaRunRequest(BaseModel):
+    code: str = Field(max_length=MAX_CODE_CHARS)
+
+
+class DsaSubmitRequest(DsaRunRequest):
+    voice: str = DEFAULT_VOICE
+
+
+class DsaSubmitResponse(BaseModel):
+    reply: str
+    audio_b64: str
+    phase: str
+    question_number: int
+    total_questions: int
+    stage: str
+    run: RunReport
 
 
 class QuestionScore(BaseModel):
@@ -129,6 +178,41 @@ def _external_phase(state: InterviewState) -> str:
 
 def _stage(state: InterviewState) -> str:
     return "done" if state["phase"] == "done" else state["current_question"]["stage"]
+
+
+def _dsa_payload(state: InterviewState) -> DsaPayload | None:
+    question = state["current_question"]
+    if state["phase"] == "done" or question.get("stage") != "dsa":
+        return None
+    return DsaPayload(
+        function_name=question["function_name"],
+        signature=question["signature"],
+        starter_code=question["starter_code"],
+        test_cases=question["test_cases"],
+    )
+
+
+def _run_report(result: RunResult) -> RunReport:
+    return RunReport(
+        status=result.status,
+        error=result.error,
+        passed=sum(1 for r in result.results if r.passed),
+        total=len(result.results),
+        results=[
+            TestCaseReport(args=r.args, expected=r.expected, got=r.got, passed=r.passed)
+            for r in result.results
+        ],
+    )
+
+
+def _current_dsa_question(session_id: str) -> tuple[InterviewState, dict]:
+    state = _sessions.get(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="unknown session")
+    question = state["current_question"]
+    if state["phase"] == "done" or question.get("stage") != "dsa":
+        raise HTTPException(status_code=409, detail="the Session is not on a coding question")
+    return state, question
 
 
 @app.get("/api/health")
@@ -221,6 +305,10 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
     if state is None:
         raise HTTPException(status_code=404, detail="unknown session")
 
+    current = state["current_question"]
+    if current.get("stage") == "dsa" and "submission" not in current:
+        raise HTTPException(status_code=409, detail="submit code for this question first")
+
     graph = build_graph(get_provider())
     try:
         state = await submit_answer(graph, state, req.transcript)
@@ -241,6 +329,58 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
         question_number=number,
         total_questions=total,
         stage=_stage(state),
+        dsa=_dsa_payload(state),
+    )
+
+
+@app.post("/api/session/{session_id}/dsa/run", response_model=RunReport)
+async def dsa_run(session_id: str, req: DsaRunRequest) -> RunReport:
+    """Run the Candidate's code against the current question's test cases.
+
+    Free iteration: no LLM, no Session state change (ADR 0017)."""
+    _, question = _current_dsa_question(session_id)
+    result = await asyncio.to_thread(
+        run_tests, req.code, question["function_name"], question["test_cases"]
+    )
+    return _run_report(result)
+
+
+@app.post("/api/session/{session_id}/dsa/submit", response_model=DsaSubmitResponse)
+async def dsa_submit(session_id: str, req: DsaSubmitRequest) -> DsaSubmitResponse:
+    """Final Submission: run the tests, get the interviewer's spoken reaction,
+    and open the discussion. Once per question (ADR 0017)."""
+    state, question = _current_dsa_question(session_id)
+    if "submission" in question:
+        raise HTTPException(status_code=409, detail="code was already submitted for this question")
+
+    result = await asyncio.to_thread(
+        run_tests, req.code, question["function_name"], question["test_cases"]
+    )
+    try:
+        reaction = await get_provider().react_to_code(
+            question=question["question"], code=req.code, results_summary=summarize_run(result)
+        )
+    except ProviderError as exc:
+        # State untouched: the Candidate just presses Submit again (ADR 0017).
+        logger.warning("code reaction failed for session %s: %s", session_id, type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="the AI provider is temporarily unavailable — please try again",
+        ) from exc
+
+    state = submit_code(state, req.code, result, reaction)
+    _sessions[session_id] = state
+
+    audio = await synthesize(state["reply"], req.voice)
+    number, total = _progress(state)
+    return DsaSubmitResponse(
+        reply=state["reply"],
+        audio_b64=base64.b64encode(audio).decode(),
+        phase=_external_phase(state),
+        question_number=number,
+        total_questions=total,
+        stage=_stage(state),
+        run=_run_report(result),
     )
 
 

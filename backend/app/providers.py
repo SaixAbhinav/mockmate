@@ -84,6 +84,18 @@ WARM_UP_QUESTIONS_SYSTEM_PROMPT = (
     '"follow_up_hints": [string]}]}.'
 )
 
+REACT_TO_CODE_SYSTEM_PROMPT = (
+    "You are a professional but friendly technical interviewer in the live "
+    "coding round of a mock interview. You are given the coding question, the "
+    "candidate's submitted Python code, and the results of running it against "
+    "the test cases. Reply with one short spoken remark: one sentence that "
+    "honestly acknowledges the result (all passing, partially passing, "
+    "failing, crashed, or timed out), then exactly one question about their "
+    "approach - why they chose it, its complexity, or how they would fix a "
+    "failing case. Never dictate the corrected solution. Keep it under 60 "
+    "words - it is spoken aloud. Respond with plain text, not JSON."
+)
+
 DIMENSIONS = ("correctness", "depth", "clarity")
 
 
@@ -160,6 +172,13 @@ class LLMProvider(Protocol):
         Raises ProviderError on failure."""
         ...
 
+    async def react_to_code(
+        self, question: str, code: str, results_summary: str
+    ) -> str:
+        """Spoken reaction to a DSA submission plus one approach question
+        (ADR 0017). Plain text. Raises ProviderError on failure."""
+        ...
+
 
 def _judge_user_turn(question: str, follow_up_hints: list[str], answer: str) -> str:
     return (
@@ -207,6 +226,14 @@ def _assess_user_turn(scores: list[dict]) -> str:
 
 def _warm_up_user_turn(resume_text: str, domain: str) -> str:
     return f"Interview domain: {domain}\nResume:\n{resume_text}"
+
+
+def _react_user_turn(question: str, code: str, results_summary: str) -> str:
+    return (
+        f"Coding question: {question}\n"
+        f"Submitted code:\n{code}\n"
+        f"Test results: {results_summary}"
+    )
 
 
 def _parse_warm_up_questions(content: str) -> list[dict]:
@@ -318,6 +345,15 @@ class GroqProvider:
         ]
         return _parse_warm_up_questions(await self._chat_json(messages, max_tokens=800))
 
+    async def react_to_code(
+        self, question: str, code: str, results_summary: str
+    ) -> str:
+        messages = [
+            {"role": "system", "content": REACT_TO_CODE_SYSTEM_PROMPT},
+            {"role": "user", "content": _react_user_turn(question, code, results_summary)},
+        ]
+        return await self._chat_json(messages, max_tokens=200, json_mode=False)
+
     async def _chat_json(
         self, messages: list[dict[str, str]], max_tokens: int, json_mode: bool = True
     ) -> str:
@@ -404,6 +440,14 @@ class GeminiProvider:
             WARM_UP_QUESTIONS_SYSTEM_PROMPT, contents, response_mime_type="application/json"
         )
         return _parse_warm_up_questions(content)
+
+    async def react_to_code(
+        self, question: str, code: str, results_summary: str
+    ) -> str:
+        contents = [
+            {"role": "user", "parts": [{"text": _react_user_turn(question, code, results_summary)}]}
+        ]
+        return await self._generate(REACT_TO_CODE_SYSTEM_PROMPT, contents)
 
     @staticmethod
     def _to_gemini_contents(history: list[dict[str, str]]) -> list[dict]:
@@ -502,6 +546,14 @@ class ScriptedProvider:
         # No model, no generation - the endpoint falls back to the curated bank.
         return []
 
+    async def react_to_code(
+        self, question: str, code: str, results_summary: str
+    ) -> str:
+        return (
+            "Thanks for submitting. Talk me through your approach - what does "
+            "your solution do, and what is its time complexity?"
+        )
+
 
 class FailoverProvider:
     """Two providers, two quotas: retry on the secondary when the primary is
@@ -568,6 +620,13 @@ class FailoverProvider:
     ) -> list[dict]:
         return await self._call(
             "generate_warm_up_questions", resume_text=resume_text, domain=domain
+        )
+
+    async def react_to_code(
+        self, question: str, code: str, results_summary: str
+    ) -> str:
+        return await self._call(
+            "react_to_code", question=question, code=code, results_summary=results_summary
         )
 
 
