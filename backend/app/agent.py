@@ -141,6 +141,37 @@ def submit_code(
     }
 
 
+def record_interjection(state: InterviewState, remark: str) -> InterviewState:
+    """The watching interviewer speaks during the DSA round (ADR 0018).
+
+    The remark joins the transcript so the submit reaction and later probes
+    are grounded in what was already said. No phase change, no queue
+    movement, no follow-up budget consumed - a Check-in is not a Probe.
+    """
+    return {
+        **state,
+        "transcript": [*state["transcript"], {"role": "assistant", "content": remark}],
+        "reply": remark,
+    }
+
+
+def record_coding_chat(state: InterviewState, utterance: str, reply: str) -> InterviewState:
+    """A spoken exchange while the Candidate is still coding (ADR 0019).
+
+    Both turns join the transcript; nothing advances - the Submission is
+    still the only way past a coding question.
+    """
+    return {
+        **state,
+        "transcript": [
+            *state["transcript"],
+            {"role": "user", "content": utterance},
+            {"role": "assistant", "content": reply},
+        ],
+        "reply": reply,
+    }
+
+
 def _close_out_current_question(state: InterviewState) -> list[dict]:
     """Append the current question's result to `completed`.
 
@@ -160,6 +191,13 @@ def _close_out_current_question(state: InterviewState) -> list[dict]:
     }
     if "submission" in question:
         record["submission"] = question["submission"]
+    if "watch" in question:
+        record["watch"] = {
+            "interjections": question["watch"]["interjections"],
+            "hints": question["watch"]["hints"],
+            "chats": question["watch"]["chats"],
+            "runs": question["watch"]["runs"],
+        }
     return [*state["completed"], record]
 
 
