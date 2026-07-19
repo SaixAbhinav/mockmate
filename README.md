@@ -11,9 +11,12 @@ opening: a "tell me about yourself" intro, then a warm-up round grounded in
 your uploaded resume (PDF or text, optional) — with probing and clarifying
 follow-ups throughout — then a coding round (2 Python questions run against
 test cases in a sandboxed subprocess; the interviewer reacts to the results
-and probes your approach), then a wrap-up and a scored Evaluation. With both
-a Groq and a Gemini key configured, provider failures fail over
-automatically.
+and probes your approach), then a wrap-up and a scored Evaluation. During the
+coding round the interviewer watches the code: typing-anchored check-ins with
+cooldowns, an invitation to ask questions after two silent minutes, and a
+hint when you're stuck or repeatedly failing the tests — and you can talk to
+it while coding, not just after submitting. With both a Groq and a Gemini
+key configured, provider failures fail over automatically.
 
 ## Run it
 
@@ -58,7 +61,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-127 passed.
+169 passed.
 
 ## Design decisions
 

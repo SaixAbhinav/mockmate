@@ -1,6 +1,13 @@
 import pytest
 
-from app.agent import build_graph, start_session, submit_answer, submit_code
+from app.agent import (
+    build_graph,
+    record_coding_chat,
+    record_interjection,
+    start_session,
+    submit_answer,
+    submit_code,
+)
 from app.providers import (
     Judgment,
     ProviderMalformedError,
@@ -8,6 +15,7 @@ from app.providers import (
     ScriptedProvider,
 )
 from app.runner import RunResult, TestCaseResult
+from app.watcher import note_chat, note_interjection, note_run, start_watch
 
 pytestmark = pytest.mark.anyio
 
@@ -344,3 +352,52 @@ async def test_completed_record_carries_the_submission():
     assert state["phase"] == "done"  # queue was empty, so the Session wraps
     assert state["completed"][-1]["submission"]["code"] == "code"
     assert "submission" not in state["completed"][0] if len(state["completed"]) > 1 else True
+
+
+async def test_record_interjection_only_touches_the_transcript():
+    state = _fast_forward_to_dsa(start_session("s1", "ml_genai", seed=1))
+    before_phase, before_queue = state["phase"], list(state["queue"])
+
+    state = record_interjection(state, "How is the loop coming along?")
+
+    assert state["transcript"][-1] == {
+        "role": "assistant",
+        "content": "How is the loop coming along?",
+    }
+    assert state["phase"] == before_phase
+    assert state["queue"] == before_queue
+    assert state["follow_up_count"] == 0  # a Check-in is not a Probe
+
+
+async def test_record_coding_chat_appends_both_turns_and_advances_nothing():
+    state = _fast_forward_to_dsa(start_session("s1", "ml_genai", seed=1))
+
+    state = record_coding_chat(state, "Can the list be empty?", "Yes - handle that case.")
+
+    assert state["transcript"][-2] == {"role": "user", "content": "Can the list be empty?"}
+    assert state["transcript"][-1] == {
+        "role": "assistant",
+        "content": "Yes - handle that case.",
+    }
+    assert "submission" not in state["current_question"]
+    assert state["phase"] != "done"
+
+
+async def test_completed_record_carries_the_watch_counts():
+    provider = FakeProvider([Judgment("advance", "ok", True)])
+    graph = build_graph(provider)
+    state = _fast_forward_to_dsa(start_session("s1", "ml_genai", seed=1))
+    watch = note_interjection(start_watch(now=0.0), now=100.0, action="hint")
+    watch = note_interjection(watch, now=200.0, action="ask")
+    watch = note_run(note_chat(watch), passed=2, total=4)
+    state = {**state, "current_question": {**state["current_question"], "watch": watch}}
+    state = submit_code(state, "code", RunResult(status="ok", error=None, results=[]), "reaction")
+
+    state = await submit_answer(graph, state, "I used a running total.")
+
+    assert state["completed"][-1]["watch"] == {
+        "interjections": 2,
+        "hints": 1,
+        "chats": 1,
+        "runs": 1,
+    }

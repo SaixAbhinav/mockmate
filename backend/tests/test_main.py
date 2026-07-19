@@ -57,10 +57,11 @@ DSA_STUB_CODE = "x = 1"  # defines nothing; the run errors, but a Submission is 
 def _drive_to_done(client, session_id):
     for _ in range(30):
         resp = client.post(f"/api/session/{session_id}/answer", json={"transcript": "answer"})
-        if resp.status_code == 409:  # DSA question awaiting code
+        data = resp.json()
+        if data.get("dsa"):  # a coding question awaits a Submission (ADR 0019: answering just chats)
             client.post(f"/api/session/{session_id}/dsa/submit", json={"code": DSA_STUB_CODE})
             continue
-        if resp.json()["phase"] == "done":
+        if data["phase"] == "done":
             return
     raise AssertionError("session never reached done")
 
@@ -178,10 +179,11 @@ async def test_concurrent_evaluation_requests_score_only_once(monkeypatch, anyio
         sid = (await ac.post("/api/session", json={"domain": "ml_genai"})).json()["session_id"]
         for _ in range(30):
             resp = await ac.post(f"/api/session/{sid}/answer", json={"transcript": "a"})
-            if resp.status_code == 409:
+            data = resp.json()
+            if data.get("dsa"):
                 await ac.post(f"/api/session/{sid}/dsa/submit", json={"code": "x = 1"})
                 continue
-            if resp.json()["phase"] == "done":
+            if data["phase"] == "done":
                 break
 
         first, second = await asyncio.gather(
@@ -367,12 +369,26 @@ def test_run_outside_the_dsa_stage_returns_409(client):
     assert resp.status_code == 409
 
 
-def test_answer_during_dsa_before_submit_returns_409(client, monkeypatch):
+def test_answer_during_coding_chats_without_advancing(client, monkeypatch):
+    """ADR 0019 behavior change: what was a 409 (ADR 0017) is now a side
+    conversation - voice is live while coding, but nothing advances and the
+    Submission is still the only way past the question."""
     session_id = _reach_dsa(client, monkeypatch)
 
-    resp = client.post(f"/api/session/{session_id}/answer", json={"transcript": "talk"})
+    resp = client.post(
+        f"/api/session/{session_id}/answer", json={"transcript": "Can the input be empty?"}
+    )
 
-    assert resp.status_code == 409
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reply"]  # the scripted chat line
+    assert data["dsa"]["function_name"] == "echo"  # still on the coding question
+    assert data["question_number"] == 5  # intro + 3 warm-ups done, DSA current - unmoved
+
+    # The Submission is still the only way forward:
+    submit = client.post(f"/api/session/{session_id}/dsa/submit", json={"code": ECHO_SOLUTION})
+    assert submit.status_code == 200
+    assert submit.json()["phase"] == "probing"
 
 
 def test_submit_returns_reaction_and_opens_the_discussion(client, monkeypatch):
@@ -406,9 +422,8 @@ def test_second_submit_for_the_same_question_returns_409(client, monkeypatch):
 def test_failed_reaction_leaves_the_session_untouched(client, monkeypatch):
     """The ordering guarantee at the heart of ADR 0017: run, then react, then
     mutate. A provider failure between run and react must leave the Session
-    exactly as it was — no Submission recorded, /answer still 409s, and a
-    retry with a working provider succeeds as if the failed attempt never
-    happened."""
+    exactly as it was — no Submission recorded, so a retry with a working
+    provider succeeds as if the failed attempt never happened."""
     from app import main as main_module
     from app.providers import ProviderUnavailableError
 
@@ -426,11 +441,8 @@ def test_failed_reaction_leaves_the_session_untouched(client, monkeypatch):
     failed = client.post(f"/api/session/{session_id}/dsa/submit", json={"code": ECHO_SOLUTION})
     assert failed.status_code == 503
 
-    # No Submission was attached: /answer still refuses to accept a spoken turn.
-    blocked = client.post(f"/api/session/{session_id}/answer", json={"transcript": "talk"})
-    assert blocked.status_code == 409
-
-    # Restore a working provider and retry — the failed attempt cost nothing.
+    # No Submission was attached: if the failed attempt had recorded one, this
+    # retry would 409 as a second submit. It succeeds - the failure cost nothing.
     monkeypatch.setattr(main_module, "get_provider", real_get_provider)
     retried = client.post(f"/api/session/{session_id}/dsa/submit", json={"code": ECHO_SOLUTION})
     assert retried.status_code == 200
@@ -484,3 +496,228 @@ def test_dsa_payload_hidden_after_submission_with_probe_response(client, monkeyp
         "After submitting DSA code, the editor should close even during "
         "post-submit probe/clarify discussion"
     )
+
+
+# --- The watching interviewer (ADR 0018/0019) ---
+
+from app.providers import ScriptedProvider, WatchDecision
+from app.watcher import (
+    CHAT_CAP_REMARK,
+    CHECK_IN_INTERVAL_SECONDS,
+    INTERJECTION_COOLDOWN_SECONDS,
+    MAX_CHATS_PER_QUESTION,
+    OFFER_AFTER_SECONDS,
+    OFFER_REMARK,
+)
+
+EDITED_CODE = "def echo(x):\n    return x"
+
+
+class _Clock:
+    """Monkeypatch target for app.main._now: tests move time, never sleep."""
+
+    def __init__(self, start=1000.0):
+        self.t = start
+
+    def __call__(self):
+        return self.t
+
+    def advance(self, seconds):
+        self.t += seconds
+
+
+class HintingWatcher(ScriptedProvider):
+    """Scripted provider that always wants to speak on a Check-in."""
+
+    def __init__(self):
+        self.watch_calls = 0
+        self.last_stuck = None
+        self.last_runs_summary = None
+
+    async def watch_code(self, question, code, stuck, seconds_elapsed, runs_summary):
+        self.watch_calls += 1
+        self.last_stuck = stuck
+        self.last_runs_summary = runs_summary
+        return WatchDecision(action="hint", remark="Try a running total.")
+
+
+def _watching_session(client, monkeypatch):
+    """A Session on the echo DSA question, with a controlled clock and a
+    watcher that speaks whenever the policy lets it."""
+    session_id = _reach_dsa(client, monkeypatch)
+    clock = _Clock()
+    monkeypatch.setattr("app.main._now", clock)
+    watcher = HintingWatcher()
+    monkeypatch.setattr("app.main.get_provider", lambda: watcher)
+    return session_id, clock, watcher
+
+
+def _snapshot(client, session_id, code):
+    return client.post(f"/api/session/{session_id}/dsa/snapshot", json={"code": code})
+
+
+def _check_in(client, session_id):
+    return client.post(f"/api/session/{session_id}/dsa/check-in", json={})
+
+
+def test_snapshot_is_accepted_on_a_coding_question(client, monkeypatch):
+    session_id = _reach_dsa(client, monkeypatch)
+
+    resp = _snapshot(client, session_id, EDITED_CODE)
+
+    assert resp.status_code == 200
+    assert resp.json() == {"received": True}
+
+
+def test_snapshot_outside_the_dsa_stage_returns_409(client):
+    session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
+
+    resp = _snapshot(client, session_id, "x = 1")
+
+    assert resp.status_code == 409
+
+
+def test_snapshot_after_submission_returns_409(client, monkeypatch):
+    session_id = _reach_dsa(client, monkeypatch)
+    client.post(f"/api/session/{session_id}/dsa/submit", json={"code": ECHO_SOLUTION})
+
+    resp = _snapshot(client, session_id, "late")
+
+    assert resp.status_code == 409
+
+
+def test_check_in_is_silent_before_typing_plus_the_interval(client, monkeypatch):
+    session_id, clock, watcher = _watching_session(client, monkeypatch)
+    _snapshot(client, session_id, EDITED_CODE)  # typing starts
+    clock.advance(CHECK_IN_INTERVAL_SECONDS - 1)
+
+    resp = _check_in(client, session_id)
+
+    assert resp.status_code == 200
+    assert resp.json()["action"] == "silent"
+    assert watcher.watch_calls == 0  # the gate never woke the LLM
+
+
+def test_check_in_speaks_after_typing_plus_the_interval(client, monkeypatch):
+    from app.main import _sessions
+
+    session_id, clock, watcher = _watching_session(client, monkeypatch)
+    _snapshot(client, session_id, EDITED_CODE)
+    clock.advance(CHECK_IN_INTERVAL_SECONDS)
+
+    resp = _check_in(client, session_id)
+
+    data = resp.json()
+    assert data["action"] == "hint"
+    assert data["remark"] == "Try a running total."
+    assert data["audio_b64"]
+    assert watcher.watch_calls == 1
+    assert watcher.last_stuck is False  # they edited since the starter
+    assert _sessions[session_id]["transcript"][-1] == {
+        "role": "assistant",
+        "content": "Try a running total.",
+    }
+
+
+def test_first_look_on_unchanged_code_reports_stuck(client, monkeypatch):
+    session_id, clock, watcher = _watching_session(client, monkeypatch)
+    _snapshot(client, session_id, ECHO_DSA_QUESTION.starter_code + "\n")  # whitespace only
+    clock.advance(CHECK_IN_INTERVAL_SECONDS)
+
+    _check_in(client, session_id)
+
+    assert watcher.last_stuck is True
+
+
+def test_two_minutes_of_silence_earns_the_offer(client, monkeypatch):
+    from app.main import _sessions
+
+    session_id, clock, watcher = _watching_session(client, monkeypatch)
+    _check_in(client, session_id)  # arms the watch at t0
+    clock.advance(OFFER_AFTER_SECONDS)
+
+    resp = _check_in(client, session_id)
+
+    data = resp.json()
+    assert data["action"] == "offer"
+    assert data["remark"] == OFFER_REMARK
+    assert data["audio_b64"]
+    assert watcher.watch_calls == 0  # deterministic - no LLM involved
+    assert _sessions[session_id]["transcript"][-1] == {
+        "role": "assistant",
+        "content": OFFER_REMARK,
+    }
+
+
+def test_after_the_offer_the_llm_takes_over(client, monkeypatch):
+    session_id, clock, watcher = _watching_session(client, monkeypatch)
+    _check_in(client, session_id)  # arms the watch
+    clock.advance(OFFER_AFTER_SECONDS)
+    _check_in(client, session_id)  # the Offer
+    clock.advance(INTERJECTION_COOLDOWN_SECONDS)
+
+    resp = _check_in(client, session_id)
+
+    assert resp.json()["action"] == "hint"
+    assert watcher.watch_calls == 1
+    assert watcher.last_stuck is True  # still nothing typed - now honestly stuck
+
+
+def test_check_in_holds_the_cooldown_after_speaking(client, monkeypatch):
+    session_id, clock, watcher = _watching_session(client, monkeypatch)
+    _snapshot(client, session_id, EDITED_CODE)
+    clock.advance(CHECK_IN_INTERVAL_SECONDS)
+    _check_in(client, session_id)  # speaks (hint)
+    clock.advance(CHECK_IN_INTERVAL_SECONDS)  # past the interval, inside the 90 s cooldown
+
+    resp = _check_in(client, session_id)
+
+    assert resp.json()["action"] == "silent"
+    assert watcher.watch_calls == 1
+
+
+def test_run_results_reach_the_watcher(client, monkeypatch):
+    session_id, clock, watcher = _watching_session(client, monkeypatch)
+    _snapshot(client, session_id, ECHO_SOLUTION)
+    client.post(f"/api/session/{session_id}/dsa/run", json={"code": ECHO_SOLUTION})
+    clock.advance(CHECK_IN_INTERVAL_SECONDS)
+
+    _check_in(client, session_id)
+
+    assert "1" in watcher.last_runs_summary
+    assert "2 of 2" in watcher.last_runs_summary
+
+
+def test_check_in_failure_stays_silent(client, monkeypatch):
+    class FailingWatcher(ScriptedProvider):
+        async def watch_code(self, question, code, stuck, seconds_elapsed, runs_summary):
+            raise ProviderUnavailableError("rate limited")
+
+    session_id = _reach_dsa(client, monkeypatch)
+    clock = _Clock()
+    monkeypatch.setattr("app.main._now", clock)
+    monkeypatch.setattr("app.main.get_provider", lambda: FailingWatcher())
+    _snapshot(client, session_id, EDITED_CODE)
+    clock.advance(CHECK_IN_INTERVAL_SECONDS)
+
+    resp = _check_in(client, session_id)
+
+    assert resp.status_code == 200  # a poll never surfaces a provider error
+    assert resp.json()["action"] == "silent"
+
+
+def test_chat_past_the_cap_gets_the_canned_redirect(client, monkeypatch):
+    session_id = _reach_dsa(client, monkeypatch)
+    for _ in range(MAX_CHATS_PER_QUESTION):
+        resp = client.post(
+            f"/api/session/{session_id}/answer", json={"transcript": "thinking aloud"}
+        )
+        assert resp.status_code == 200
+
+    capped = client.post(
+        f"/api/session/{session_id}/answer", json={"transcript": "one more thing"}
+    )
+
+    assert capped.status_code == 200
+    assert capped.json()["reply"] == CHAT_CAP_REMARK
+    assert capped.json()["dsa"]  # still on the question, still not advanced
