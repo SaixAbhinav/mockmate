@@ -88,13 +88,47 @@ REACT_TO_CODE_SYSTEM_PROMPT = (
     "You are a professional but friendly technical interviewer in the live "
     "coding round of a mock interview. You are given the coding question, the "
     "candidate's submitted Python code, and the results of running it against "
-    "the test cases. Reply with one short spoken remark: one sentence that "
-    "honestly acknowledges the result (all passing, partially passing, "
+    "the test cases. You also see the conversation so far, including anything "
+    "you said while watching them code: if the candidate followed a hint you "
+    "gave, acknowledge it naturally - never ask them to justify choosing an "
+    "approach you suggested. Reply with one short spoken remark: one sentence "
+    "that honestly acknowledges the result (all passing, partially passing, "
     "failing, crashed, or timed out), then exactly one question about their "
     "approach - why they chose it, its complexity, or how they would fix a "
     "failing case. Never dictate the corrected solution. Keep it under 60 "
     "words - it is spoken aloud. Respond with plain text, not JSON."
 )
+
+WATCH_CODE_SYSTEM_PROMPT = (
+    "You are a professional but friendly technical interviewer watching a "
+    "candidate write Python during the live coding round of a mock "
+    "interview. You are given the coding question, the candidate's current "
+    "code (a work in progress, not a submission), how long they have been "
+    "on this question, whether they appear stuck (no meaningful edits "
+    "since your last look), and a summary of their test runs so far. "
+    "Decide one of three actions: 'silent' (the default - a candidate "
+    "making progress should be left alone), 'ask' (one short question "
+    "about what they are doing, only when something notable is on screen), "
+    "or 'hint' (only when they are stuck or repeatedly failing the tests - "
+    "one small nudge toward the next step, never the solution or its "
+    "code). Keep the remark under 40 words - it is spoken aloud; use an "
+    "empty string when silent. Respond with strict JSON only: "
+    '{"action": "silent"|"ask"|"hint", "remark": string}.'
+)
+
+CODING_CHAT_SYSTEM_PROMPT = (
+    "You are a professional but friendly technical interviewer in the live "
+    "coding round of a mock interview. The candidate is still writing code "
+    "and just said something aloud. You are given the coding question, "
+    "their current code, and what they said. Reply with one short spoken "
+    "response: answer a clarifying question about the problem, acknowledge "
+    "thinking aloud, or nudge them to keep going. Never dictate the "
+    "solution or write code for them; if they ask for the answer, decline "
+    "warmly and offer a direction instead. Keep it under 40 words - it is "
+    "spoken aloud. Respond with plain text, not JSON."
+)
+
+WATCH_ACTIONS = ("silent", "ask", "hint")
 
 DIMENSIONS = ("correctness", "depth", "clarity")
 
@@ -137,6 +171,14 @@ class Assessment:
     improvements: list[str]
 
 
+@dataclass(frozen=True)
+class WatchDecision:
+    """The watching interviewer's call on one Check-in (ADR 0018)."""
+
+    action: str  # "silent" | "ask" | "hint"
+    remark: str
+
+
 class LLMProvider(Protocol):
     name: str
 
@@ -173,10 +215,27 @@ class LLMProvider(Protocol):
         ...
 
     async def react_to_code(
-        self, question: str, code: str, results_summary: str
+        self, question: str, code: str, results_summary: str,
+        history: list[dict[str, str]],
     ) -> str:
         """Spoken reaction to a DSA submission plus one approach question
-        (ADR 0017). Plain text. Raises ProviderError on failure."""
+        (ADR 0017/0019). Sees the transcript so it never contradicts the
+        watcher's own hints. Plain text. Raises ProviderError on failure."""
+        ...
+
+    async def watch_code(
+        self, question: str, code: str, stuck: bool, seconds_elapsed: float,
+        runs_summary: str,
+    ) -> WatchDecision:
+        """One Check-in on the Candidate's work in progress (ADR 0018).
+        Raises ProviderError on failure - the caller stays silent."""
+        ...
+
+    async def coding_chat(
+        self, question: str, code: str, history: list[dict[str, str]], utterance: str
+    ) -> str:
+        """Spoken reply to a Candidate talking while coding (ADR 0019).
+        Plain text; never advances the interview. Raises ProviderError."""
         ...
 
 
@@ -234,6 +293,45 @@ def _react_user_turn(question: str, code: str, results_summary: str) -> str:
         f"Submitted code:\n{code}\n"
         f"Test results: {results_summary}"
     )
+
+
+def _watch_user_turn(
+    question: str, code: str, stuck: bool, seconds_elapsed: float, runs_summary: str
+) -> str:
+    progress = (
+        "no meaningful edits since your last look" if stuck else "actively editing"
+    )
+    return (
+        f"Coding question: {question}\n"
+        f"Current code (work in progress):\n{code}\n"
+        f"Time on this question: {int(seconds_elapsed)} seconds\n"
+        f"Progress: {progress}\n"
+        f"Test runs: {runs_summary}"
+    )
+
+
+def _coding_chat_user_turn(question: str, code: str, utterance: str) -> str:
+    return (
+        f"Coding question: {question}\n"
+        f"Current code (work in progress):\n{code}\n"
+        f"The candidate just said: {utterance}"
+    )
+
+
+def _parse_watch_decision(content: str) -> WatchDecision:
+    try:
+        data = json.loads(content)
+        action = data["action"]
+        remark = data["remark"]
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ProviderMalformedError(f"malformed watch decision: {content!r}") from exc
+    if action not in WATCH_ACTIONS:
+        raise ProviderMalformedError(f"unknown watch action: {action!r}")
+    if not isinstance(remark, str):
+        raise ProviderMalformedError(f"watch remark must be a string: {remark!r}")
+    if action != "silent" and not remark.strip():
+        raise ProviderMalformedError(f"watch action {action!r} needs a remark")
+    return WatchDecision(action=action, remark=remark)
 
 
 def _parse_warm_up_questions(content: str) -> list[dict]:
@@ -346,13 +444,40 @@ class GroqProvider:
         return _parse_warm_up_questions(await self._chat_json(messages, max_tokens=800))
 
     async def react_to_code(
-        self, question: str, code: str, results_summary: str
+        self, question: str, code: str, results_summary: str,
+        history: list[dict[str, str]],
     ) -> str:
         messages = [
             {"role": "system", "content": REACT_TO_CODE_SYSTEM_PROMPT},
+            *history,
             {"role": "user", "content": _react_user_turn(question, code, results_summary)},
         ]
         return await self._chat_json(messages, max_tokens=200, json_mode=False)
+
+    async def watch_code(
+        self, question: str, code: str, stuck: bool, seconds_elapsed: float,
+        runs_summary: str,
+    ) -> WatchDecision:
+        messages = [
+            {"role": "system", "content": WATCH_CODE_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": _watch_user_turn(
+                    question, code, stuck, seconds_elapsed, runs_summary
+                ),
+            },
+        ]
+        return _parse_watch_decision(await self._chat_json(messages, max_tokens=150))
+
+    async def coding_chat(
+        self, question: str, code: str, history: list[dict[str, str]], utterance: str
+    ) -> str:
+        messages = [
+            {"role": "system", "content": CODING_CHAT_SYSTEM_PROMPT},
+            *history,
+            {"role": "user", "content": _coding_chat_user_turn(question, code, utterance)},
+        ]
+        return await self._chat_json(messages, max_tokens=150, json_mode=False)
 
     async def _chat_json(
         self, messages: list[dict[str, str]], max_tokens: int, json_mode: bool = True
@@ -442,12 +567,43 @@ class GeminiProvider:
         return _parse_warm_up_questions(content)
 
     async def react_to_code(
-        self, question: str, code: str, results_summary: str
+        self, question: str, code: str, results_summary: str,
+        history: list[dict[str, str]],
     ) -> str:
-        contents = [
+        contents = self._to_gemini_contents(history)
+        contents.append(
             {"role": "user", "parts": [{"text": _react_user_turn(question, code, results_summary)}]}
-        ]
+        )
         return await self._generate(REACT_TO_CODE_SYSTEM_PROMPT, contents)
+
+    async def watch_code(
+        self, question: str, code: str, stuck: bool, seconds_elapsed: float,
+        runs_summary: str,
+    ) -> WatchDecision:
+        contents = [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": _watch_user_turn(question, code, stuck, seconds_elapsed, runs_summary)}
+                ],
+            }
+        ]
+        content = await self._generate(
+            WATCH_CODE_SYSTEM_PROMPT, contents, response_mime_type="application/json"
+        )
+        return _parse_watch_decision(content)
+
+    async def coding_chat(
+        self, question: str, code: str, history: list[dict[str, str]], utterance: str
+    ) -> str:
+        contents = self._to_gemini_contents(history)
+        contents.append(
+            {
+                "role": "user",
+                "parts": [{"text": _coding_chat_user_turn(question, code, utterance)}],
+            }
+        )
+        return await self._generate(CODING_CHAT_SYSTEM_PROMPT, contents)
 
     @staticmethod
     def _to_gemini_contents(history: list[dict[str, str]]) -> list[dict]:
@@ -547,11 +703,29 @@ class ScriptedProvider:
         return []
 
     async def react_to_code(
-        self, question: str, code: str, results_summary: str
+        self, question: str, code: str, results_summary: str,
+        history: list[dict[str, str]],
     ) -> str:
         return (
             "Thanks for submitting. Talk me through your approach - what does "
             "your solution do, and what is its time complexity?"
+        )
+
+    async def watch_code(
+        self, question: str, code: str, stuck: bool, seconds_elapsed: float,
+        runs_summary: str,
+    ) -> WatchDecision:
+        # No model, no opinion: the scripted watcher never interrupts. The
+        # deterministic Offer (ADR 0018) is the keyless demo's one watching
+        # behavior; canned LLM-style interjections would just nag.
+        return WatchDecision(action="silent", remark="")
+
+    async def coding_chat(
+        self, question: str, code: str, history: list[dict[str, str]], utterance: str
+    ) -> str:
+        return (
+            "I'm listening - keep going. If you're stuck, run the tests and "
+            "talk me through what you're seeing."
         )
 
 
@@ -623,10 +797,39 @@ class FailoverProvider:
         )
 
     async def react_to_code(
-        self, question: str, code: str, results_summary: str
+        self, question: str, code: str, results_summary: str,
+        history: list[dict[str, str]],
     ) -> str:
         return await self._call(
-            "react_to_code", question=question, code=code, results_summary=results_summary
+            "react_to_code",
+            question=question,
+            code=code,
+            results_summary=results_summary,
+            history=history,
+        )
+
+    async def watch_code(
+        self, question: str, code: str, stuck: bool, seconds_elapsed: float,
+        runs_summary: str,
+    ) -> WatchDecision:
+        return await self._call(
+            "watch_code",
+            question=question,
+            code=code,
+            stuck=stuck,
+            seconds_elapsed=seconds_elapsed,
+            runs_summary=runs_summary,
+        )
+
+    async def coding_chat(
+        self, question: str, code: str, history: list[dict[str, str]], utterance: str
+    ) -> str:
+        return await self._call(
+            "coding_chat",
+            question=question,
+            code=code,
+            history=history,
+            utterance=utterance,
         )
 
 

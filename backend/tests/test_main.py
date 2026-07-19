@@ -418,7 +418,7 @@ def test_failed_reaction_leaves_the_session_untouched(client, monkeypatch):
     class FailingReactionProvider:
         name = "fake"
 
-        async def react_to_code(self, question, code, results_summary):
+        async def react_to_code(self, question, code, results_summary, history):
             raise ProviderUnavailableError("rate limited")
 
     monkeypatch.setattr(main_module, "get_provider", lambda: FailingReactionProvider())

@@ -14,6 +14,7 @@ from app.providers import (
     ProviderMalformedError,
     ProviderUnavailableError,
     ScriptedProvider,
+    WatchDecision,
     get_provider,
 )
 
@@ -315,8 +316,16 @@ class OneSidedProvider:
             ],
         )
 
-    async def react_to_code(self, question, code, results_summary):
+    async def react_to_code(self, question, code, results_summary, history):
         return await self._respond("react_to_code", f"{self.name} reaction")
+
+    async def watch_code(self, question, code, stuck, seconds_elapsed, runs_summary):
+        return await self._respond(
+            "watch_code", WatchDecision(action="ask", remark=f"{self.name} watch")
+        )
+
+    async def coding_chat(self, question, code, history, utterance):
+        return await self._respond("coding_chat", f"{self.name} chat")
 
 
 async def test_failover_returns_primary_result_without_touching_secondary():
@@ -472,7 +481,9 @@ async def test_failover_delegates_generate_warm_up_questions():
 async def test_scripted_provider_reaction_asks_about_the_approach():
     provider = ScriptedProvider()
 
-    reaction = await provider.react_to_code("Q", "def f(): pass", "0 of 2 test cases passed.")
+    reaction = await provider.react_to_code(
+        "Q", "def f(): pass", "0 of 2 test cases passed.", history=[]
+    )
 
     assert "approach" in reaction.lower()
 
@@ -483,7 +494,9 @@ async def test_groq_react_to_code_returns_plain_text(fake_groq_client):
     )
     provider = GroqProvider(api_key="fake-key")
 
-    reaction = await provider.react_to_code("Q", "def f(): pass", "2 of 2 test cases passed.")
+    reaction = await provider.react_to_code(
+        "Q", "def f(): pass", "2 of 2 test cases passed.", history=[]
+    )
 
     assert reaction == "Nice - all tests pass. Why a set here?"
 
@@ -494,7 +507,104 @@ async def test_failover_delegates_react_to_code():
     provider = FailoverProvider(primary, secondary)
 
     reaction = await provider.react_to_code(
-        question="Q", code="def f(): pass", results_summary="summary"
+        question="Q", code="def f(): pass", results_summary="summary", history=[]
     )
 
     assert reaction == "secondary reaction"
+
+
+# --- The watching interviewer (ADR 0018/0019) ---
+
+NO_RUNS = "The candidate has not run the tests yet."
+
+
+async def test_scripted_watcher_stays_silent():
+    provider = ScriptedProvider()
+
+    decision = await provider.watch_code(
+        "Q", "def f(): pass", stuck=True, seconds_elapsed=120.0, runs_summary=NO_RUNS
+    )
+
+    assert decision == WatchDecision(action="silent", remark="")
+
+
+async def test_groq_watch_code_parses_a_decision(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response('{"action": "hint", "remark": "Try a running total."}')
+    )
+    provider = GroqProvider(api_key="fake-key")
+
+    decision = await provider.watch_code(
+        "Q", "def f(): pass", stuck=True, seconds_elapsed=90.0, runs_summary=NO_RUNS
+    )
+
+    assert decision == WatchDecision(action="hint", remark="Try a running total.")
+
+
+async def test_groq_watch_code_rejects_unknown_action(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response('{"action": "shout", "remark": "hey"}')
+    )
+    provider = GroqProvider(api_key="fake-key")
+
+    with pytest.raises(ProviderMalformedError):
+        await provider.watch_code(
+            "Q", "code", stuck=False, seconds_elapsed=90.0, runs_summary=NO_RUNS
+        )
+
+
+async def test_groq_watch_code_rejects_speaking_without_a_remark(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response('{"action": "ask", "remark": "   "}')
+    )
+    provider = GroqProvider(api_key="fake-key")
+
+    with pytest.raises(ProviderMalformedError):
+        await provider.watch_code(
+            "Q", "code", stuck=False, seconds_elapsed=90.0, runs_summary=NO_RUNS
+        )
+
+
+async def test_failover_delegates_watch_code():
+    primary = OneSidedProvider("primary", error=ProviderUnavailableError("429"))
+    secondary = OneSidedProvider("secondary")
+    provider = FailoverProvider(primary, secondary)
+
+    decision = await provider.watch_code(
+        question="Q", code="c", stuck=False, seconds_elapsed=80.0, runs_summary=NO_RUNS
+    )
+
+    assert decision.remark == "secondary watch"
+
+
+async def test_scripted_coding_chat_returns_a_spoken_line():
+    provider = ScriptedProvider()
+
+    reply = await provider.coding_chat("Q", "def f(): pass", history=[], utterance="hm")
+
+    assert "listening" in reply.lower()
+
+
+async def test_groq_coding_chat_returns_plain_text(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response("Good question - yes, the list can be empty.")
+    )
+    provider = GroqProvider(api_key="fake-key")
+
+    reply = await provider.coding_chat(
+        "Q", "def f(): pass", history=[], utterance="Can the list be empty?"
+    )
+
+    assert reply == "Good question - yes, the list can be empty."
+
+
+async def test_failover_delegates_coding_chat():
+    primary = OneSidedProvider("primary", error=ProviderUnavailableError("429"))
+    secondary = OneSidedProvider("secondary")
+    provider = FailoverProvider(primary, secondary)
+
+    reply = await provider.coding_chat(
+        question="Q", code="c", history=[], utterance="hm"
+    )
+
+    assert reply == "secondary chat"

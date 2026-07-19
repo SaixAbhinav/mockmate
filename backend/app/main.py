@@ -362,7 +362,10 @@ async def dsa_submit(session_id: str, req: DsaSubmitRequest) -> DsaSubmitRespons
     )
     try:
         reaction = await get_provider().react_to_code(
-            question=question["question"], code=req.code, results_summary=summarize_run(result)
+            question=question["question"],
+            code=req.code,
+            results_summary=summarize_run(result),
+            history=state["transcript"],
         )
     except ProviderError as exc:
         # State untouched: the Candidate just presses Submit again (ADR 0017).
