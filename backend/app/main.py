@@ -5,6 +5,8 @@ POST /api/transcribe   (audio file)  -> {transcript}
 POST /api/session/{id}/answer        -> judges the answer, advances the Session
 POST /api/session/{id}/dsa/run       -> runs candidate code against test cases
 POST /api/session/{id}/dsa/submit    -> submits code, gets the interviewer's reaction
+POST /api/session/{id}/dsa/snapshot  -> stores the candidate's latest code (no LLM)
+POST /api/session/{id}/dsa/check-in  -> the watching interviewer's look at the latest Snapshot
 
 Session state lives in an in-memory dict (ADR 0007): fine for anonymous,
 single-process demo traffic; orphaned sessions are known, deferred debt.
@@ -13,6 +15,7 @@ single-process demo traffic; orphaned sessions are known, deferred debt.
 import asyncio
 import base64
 import logging
+import time
 import uuid
 
 from dotenv import load_dotenv
@@ -20,13 +23,36 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .agent import InterviewState, start_session, submit_answer, submit_code, build_graph
+from .agent import (
+    InterviewState,
+    build_graph,
+    record_coding_chat,
+    record_interjection,
+    start_session,
+    submit_answer,
+    submit_code,
+)
 from .evaluator import build_evaluator_graph, evaluate_session
-from .providers import ProviderError, ProviderUnavailableError, get_provider
+from .providers import ProviderError, ProviderUnavailableError, WatchDecision, get_provider
 from .resume import ResumeError, extract_resume_text
 from .runner import RunResult, run_tests, summarize_run
 from .stt import SttUnavailableError, transcribe
 from .tts import DEFAULT_VOICE, VOICES, synthesize
+from .watcher import (
+    CHAT_CAP_REMARK,
+    MAX_CHATS_PER_QUESTION,
+    OFFER_REMARK,
+    check_in_due,
+    describe_runs,
+    is_stuck,
+    note_chat,
+    note_check_in,
+    note_interjection,
+    note_run,
+    offer_due,
+    record_snapshot,
+    start_watch,
+)
 
 load_dotenv()
 
@@ -57,6 +83,10 @@ _evaluation_locks: dict[str, asyncio.Lock] = {}
 # Uploaded resumes, reduced to capped plain text (ADR 0015). In-memory like
 # everything else (ADR 0007): anonymous, dies with the process. PII - never log.
 _resumes: dict[str, str] = {}
+
+# The watcher's clock, module-level so tests can monkeypatch time instead of
+# sleeping through 75-second cooldowns (ADR 0018).
+_now = time.monotonic
 
 
 class CreateSessionRequest(BaseModel):
@@ -133,6 +163,20 @@ class DsaSubmitResponse(BaseModel):
     total_questions: int
     stage: str
     run: RunReport
+
+
+class SnapshotRequest(BaseModel):
+    code: str = Field(max_length=MAX_CODE_CHARS)
+
+
+class CheckInRequest(BaseModel):
+    voice: str = DEFAULT_VOICE
+
+
+class CheckInResponse(BaseModel):
+    action: str  # "silent" | "offer" | "ask" | "hint"
+    remark: str = ""
+    audio_b64: str = ""
 
 
 class QuestionScore(BaseModel):
@@ -217,6 +261,29 @@ def _current_dsa_question(session_id: str) -> tuple[InterviewState, dict]:
     if state["phase"] == "done" or question.get("stage") != "dsa":
         raise HTTPException(status_code=409, detail="the Session is not on a coding question")
     return state, question
+
+
+def _store_watch(state: InterviewState, watch: dict) -> InterviewState:
+    return {**state, "current_question": {**state["current_question"], "watch": watch}}
+
+
+def _unsubmitted_dsa_question(session_id: str) -> tuple[InterviewState, dict]:
+    state, question = _current_dsa_question(session_id)
+    if "submission" in question:
+        raise HTTPException(status_code=409, detail="code was already submitted for this question")
+    return state, question
+
+
+async def _spoken_check_in(
+    session_id: str, state: InterviewState, watch: dict, action: str, remark: str, voice: str
+) -> CheckInResponse:
+    """Deliver an interjection: transcript first, then audio (ADR 0018)."""
+    state = record_interjection(_store_watch(state, watch), remark)
+    _sessions[session_id] = state
+    audio = await synthesize(remark, voice)
+    return CheckInResponse(
+        action=action, remark=remark, audio_b64=base64.b64encode(audio).decode()
+    )
 
 
 @app.get("/api/health")
@@ -311,7 +378,43 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
 
     current = state["current_question"]
     if current.get("stage") == "dsa" and "submission" not in current:
-        raise HTTPException(status_code=409, detail="submit code for this question first")
+        # Voice is live while coding (ADR 0019): a side conversation, not a
+        # judged answer. The graph never runs, nothing advances, and the
+        # Submission stays the only way past a coding question.
+        watch = current.get("watch") or start_watch(_now())
+        code = watch["code"] if watch["code"] is not None else current["starter_code"]
+        if watch["chats"] >= MAX_CHATS_PER_QUESTION:
+            # The cap keeps chat from being the app's one unmetered LLM
+            # surface. A canned spoken redirect, not an error (ADR 0019).
+            reply = CHAT_CAP_REMARK
+        else:
+            try:
+                reply = await get_provider().coding_chat(
+                    question=current["question"],
+                    code=code,
+                    history=state["transcript"],
+                    utterance=req.transcript,
+                )
+            except ProviderUnavailableError as exc:
+                logger.warning("coding chat unavailable for session %s: %s", session_id, exc)
+                raise HTTPException(
+                    status_code=503,
+                    detail="the AI provider is temporarily unavailable — please try again",
+                ) from exc
+            watch = note_chat(watch)
+        state = record_coding_chat(_store_watch(state, watch), req.transcript, reply)
+        _sessions[session_id] = state
+        audio = await synthesize(reply, req.voice)
+        number, total = _progress(state)
+        return AnswerResponse(
+            reply=reply,
+            audio_b64=base64.b64encode(audio).decode(),
+            phase=_external_phase(state),
+            question_number=number,
+            total_questions=total,
+            stage=_stage(state),
+            dsa=_dsa_payload(state),
+        )
 
     graph = build_graph(get_provider())
     try:
@@ -342,20 +445,28 @@ async def dsa_run(session_id: str, req: DsaRunRequest) -> RunReport:
     """Run the Candidate's code against the current question's test cases.
 
     Free iteration: no LLM, no Session state change (ADR 0017)."""
-    _, question = _current_dsa_question(session_id)
+    state, question = _current_dsa_question(session_id)
     result = await asyncio.to_thread(
         run_tests, req.code, question["function_name"], question["test_cases"]
     )
-    return _run_report(result)
+    report = _run_report(result)
+    if "submission" not in question:
+        # Watcher telemetry, not interview movement (ADR 0018): the run stays
+        # free iteration, but the watcher sees how it is going.
+        watch = note_run(
+            question.get("watch") or start_watch(_now()),
+            passed=report.passed,
+            total=report.total,
+        )
+        _sessions[session_id] = _store_watch(state, watch)
+    return report
 
 
 @app.post("/api/session/{session_id}/dsa/submit", response_model=DsaSubmitResponse)
 async def dsa_submit(session_id: str, req: DsaSubmitRequest) -> DsaSubmitResponse:
     """Final Submission: run the tests, get the interviewer's spoken reaction,
     and open the discussion. Once per question (ADR 0017)."""
-    state, question = _current_dsa_question(session_id)
-    if "submission" in question:
-        raise HTTPException(status_code=409, detail="code was already submitted for this question")
+    state, question = _unsubmitted_dsa_question(session_id)
 
     result = await asyncio.to_thread(
         run_tests, req.code, question["function_name"], question["test_cases"]
@@ -388,6 +499,69 @@ async def dsa_submit(session_id: str, req: DsaSubmitRequest) -> DsaSubmitRespons
         total_questions=total,
         stage=_stage(state),
         run=_run_report(result),
+    )
+
+
+@app.post("/api/session/{session_id}/dsa/snapshot")
+async def dsa_snapshot(session_id: str, req: SnapshotRequest):
+    """Store the Candidate's latest code for the watching interviewer.
+
+    Sent on typing pauses; no LLM, no interview movement. The first
+    Snapshot starts the watcher's clock (ADR 0018)."""
+    state, question = _unsubmitted_dsa_question(session_id)
+    now = _now()
+    watch = record_snapshot(question.get("watch") or start_watch(now), req.code, now)
+    _sessions[session_id] = _store_watch(state, watch)
+    return {"received": True}
+
+
+@app.post("/api/session/{session_id}/dsa/check-in", response_model=CheckInResponse)
+async def dsa_check_in(session_id: str, req: CheckInRequest) -> CheckInResponse:
+    """The watching interviewer's look at the latest Snapshot (ADR 0018).
+
+    Polled by the frontend. The deterministic Offer fires first when due;
+    otherwise the server-side gates (typing-anchored interval, cooldown,
+    cap) decide when a poll becomes an LLM look. Cooldowns and provider
+    failures both answer silent - a poll never surfaces an error."""
+    state, question = _unsubmitted_dsa_question(session_id)
+    now = _now()
+    watch = question.get("watch") or start_watch(now)
+
+    if offer_due(watch, now):
+        # Two minutes of silence needs no model to interpret (ADR 0018).
+        watch = note_check_in(watch, question["starter_code"], now)
+        watch = note_interjection(watch, now, action="offer")
+        return await _spoken_check_in(session_id, state, watch, "offer", OFFER_REMARK, req.voice)
+
+    if not check_in_due(watch, now):
+        _sessions[session_id] = _store_watch(state, watch)  # persists a fresh watch
+        return CheckInResponse(action="silent")
+
+    code = watch["code"] if watch["code"] is not None else question["starter_code"]
+    stuck = is_stuck(watch, question["starter_code"])
+    try:
+        decision = await get_provider().watch_code(
+            question=question["question"],
+            code=code,
+            stuck=stuck,
+            seconds_elapsed=now - watch["started_at"],
+            runs_summary=describe_runs(watch),
+        )
+    except ProviderError as exc:
+        # A watcher that can't think stays quiet (ADR 0018). Never log the code.
+        logger.warning("check-in failed for session %s: %s", session_id, type(exc).__name__)
+        decision = WatchDecision(action="silent", remark="")
+
+    # The look is recorded even on failure, so a failing provider is not
+    # hammered again on the next poll.
+    watch = note_check_in(watch, code, now)
+    if decision.action == "silent":
+        _sessions[session_id] = _store_watch(state, watch)
+        return CheckInResponse(action="silent")
+
+    watch = note_interjection(watch, now, decision.action)
+    return await _spoken_check_in(
+        session_id, state, watch, decision.action, decision.remark, req.voice
     )
 
 
