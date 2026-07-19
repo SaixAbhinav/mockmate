@@ -6,6 +6,12 @@ import './App.css'
 // Domain picker (ML/GenAI only for v1, ADR 0008).
 const DOMAINS = { ml_genai: 'ML / GenAI' }
 
+// The watching interviewer (ADR 0018): snapshot on a typing pause; poll for
+// check-ins. The backend owns the real policy (offer, interval, cooldowns,
+// cap) - the frontend just asks often and usually hears "silent".
+const SNAPSHOT_DEBOUNCE_MS = 2000
+const CHECK_IN_POLL_MS = 25000
+
 function App() {
   const [screen, setScreen] = useState('domain') // domain | interview
   const [domain, setDomain] = useState('ml_genai')
@@ -35,6 +41,8 @@ function App() {
   const recorderRef = useRef(null)
   const chatEndRef = useRef(null)
   const resumeUploadTokenRef = useRef(0)
+  const statusRef = useRef(status)
+  statusRef.current = status
 
   useEffect(() => {
     fetch('/api/voices')
@@ -70,6 +78,53 @@ function App() {
       })
     return () => controller.abort()
   }, [phase, sessionId])
+
+  // Snapshot on a typing pause (ADR 0018). Fire-and-forget: a lost snapshot
+  // just means the watcher sees slightly older code. Skip the untouched
+  // starter code: this effect also re-fires when a new question's starter
+  // code loads into `code`, and posting that would falsely mark the watcher's
+  // typing clock as started, permanently foreclosing the Offer for a
+  // Candidate who never actually typed.
+  useEffect(() => {
+    if (!dsa || dsaSubmitted || !sessionId || code === dsa.starter_code) return
+    const timer = setTimeout(() => {
+      fetch(`/api/session/${sessionId}/dsa/snapshot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      }).catch(() => {})
+    }, SNAPSHOT_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [code, dsa, dsaSubmitted, sessionId])
+
+  // Check-in poll (ADR 0018): the interviewer may stay silent, offer to
+  // clarify, ask about the code, or give a hint. Errors are silent - nobody
+  // asked for this request. If the Candidate is no longer idle when the reply
+  // arrives, show the text but never talk over them (the transcript is the
+  // truth; audio is best-effort).
+  useEffect(() => {
+    if (!dsa || dsaSubmitted || !sessionId) return
+    const timer = setInterval(async () => {
+      if (statusRef.current !== 'idle') return
+      try {
+        const resp = await fetch(`/api/session/${sessionId}/dsa/check-in`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ voice }),
+        })
+        if (!resp.ok) return
+        const data = await resp.json()
+        if (data.action === 'silent') return
+        setHistory((h) => [...h, { role: 'assistant', content: data.remark }])
+        if (statusRef.current === 'idle') {
+          await playAudio(data.audio_b64)
+        }
+      } catch {
+        // a failed check-in is a silent one
+      }
+    }, CHECK_IN_POLL_MS)
+    return () => clearInterval(timer)
+  }, [dsa, dsaSubmitted, sessionId, voice])
 
   async function playAudio(audioB64) {
     setStatus('speaking')
@@ -153,19 +208,21 @@ function App() {
   }
 
   // Every advancing response can move the interview onto (or off) a coding
-  // question; the editor state follows the dsa payload.
+  // question; the editor state follows the dsa payload - but only resets when
+  // the payload belongs to a *different* question (ADR 0019: a coding-chat
+  // reply carries the same question's payload).
   function applyProgress(data) {
     setPhase(data.phase)
-    setQuestionNumber(data.question_number)
-    setTotalQuestions(data.total_questions)
     setStage(data.stage)
     const payload = data.dsa ?? null
     setDsa(payload)
-    if (payload) {
+    if (payload && data.question_number !== questionNumber) {
       setCode(payload.starter_code)
       setRunReport(null)
       setDsaSubmitted(false)
     }
+    setQuestionNumber(data.question_number)
+    setTotalQuestions(data.total_questions)
   }
 
   async function sendTranscript(transcript) {
@@ -376,71 +433,76 @@ function App() {
               Start new interview
             </button>
           </div>
-        ) : dsa && !dsaSubmitted ? (
-          <div className="dsa-pane">
-            <p className="dsa-signature"><code>{dsa.signature}</code></p>
-            <CodeMirror
-              value={code}
-              height="220px"
-              extensions={[python()]}
-              onChange={setCode}
-            />
-            <div className="dsa-actions">
-              <button type="button" onClick={runCode} disabled={running || status === 'thinking'}>
-                {running ? 'Running…' : '▶ Run tests'}
-              </button>
-              <button
-                type="button"
-                onClick={submitCode}
-                disabled={running || status === 'thinking'}
-              >
-                {status === 'thinking' ? 'Submitting…' : 'Submit'}
-              </button>
-            </div>
-            {runReport && (
-              <div className="dsa-results">
-                {runReport.status === 'ok' ? (
-                  <p>
-                    <strong>{runReport.passed}</strong> of {runReport.total} test cases passed
-                  </p>
-                ) : (
-                  <p className="error">{runReport.error}</p>
+        ) : (
+          <>
+            {dsa && !dsaSubmitted && (
+              <div className="dsa-pane">
+                <p className="dsa-signature"><code>{dsa.signature}</code></p>
+                <CodeMirror
+                  value={code}
+                  height="220px"
+                  extensions={[python()]}
+                  onChange={setCode}
+                />
+                <div className="dsa-actions">
+                  <button type="button" onClick={runCode} disabled={running || status === 'thinking'}>
+                    {running ? 'Running…' : '▶ Run tests'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitCode}
+                    disabled={running || status === 'thinking'}
+                  >
+                    {status === 'thinking' ? 'Submitting…' : 'Submit'}
+                  </button>
+                </div>
+                {runReport && (
+                  <div className="dsa-results">
+                    {runReport.status === 'ok' ? (
+                      <p>
+                        <strong>{runReport.passed}</strong> of {runReport.total} test cases passed
+                      </p>
+                    ) : (
+                      <p className="error">{runReport.error}</p>
+                    )}
+                    {runReport.results.filter((r) => !r.passed).map((r, i) => (
+                      <p key={i} className="dsa-fail">
+                        args: <code>{JSON.stringify(r.args)}</code> · expected{' '}
+                        <code>{JSON.stringify(r.expected)}</code> · got <code>{r.got}</code>
+                      </p>
+                    ))}
+                  </div>
                 )}
-                {runReport.results.filter((r) => !r.passed).map((r, i) => (
-                  <p key={i} className="dsa-fail">
-                    args: <code>{JSON.stringify(r.args)}</code> · expected{' '}
-                    <code>{JSON.stringify(r.expected)}</code> · got <code>{r.got}</code>
-                  </p>
-                ))}
               </div>
             )}
-          </div>
-        ) : (
-          <form onSubmit={handleTextSubmit} className="composer">
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Type here"
-              disabled={status === 'thinking'}
-            />
-            <button type="submit" disabled={status === 'thinking' || !draft.trim()}>
-              Send
-            </button>
-            {status === 'recording' ? (
-              <button type="button" className="recording" onClick={stopRecording}>
-                ⏹ Stop
+            <form onSubmit={handleTextSubmit} className="composer">
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder={
+                  dsa && !dsaSubmitted ? 'Think aloud or ask the interviewer' : 'Type here'
+                }
+                disabled={status === 'thinking'}
+              />
+              <button type="submit" disabled={status === 'thinking' || !draft.trim()}>
+                Send
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={startRecording}
-                disabled={status !== 'idle'}
-                aria-label="Answer by voice"
-              >
-                🎤
-              </button>
-            )}
-          </form>
+              {status === 'recording' ? (
+                <button type="button" className="recording" onClick={stopRecording}>
+                  ⏹ Stop
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={startRecording}
+                  disabled={status !== 'idle'}
+                  aria-label="Answer by voice"
+                >
+                  🎤
+                </button>
+              )}
+            </form>
+          </>
         )}
       </section>
 
