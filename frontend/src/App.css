@@ -203,3 +203,9 @@ button.recording {
   color: #a33;
   margin: 0.15rem 0;
 }
+
+/* With voice live while coding, the editor sits above the composer - drop the
+   pane's own bottom padding so the two don't double up. */
+.dsa-pane {
+  padding-bottom: 0;
+}
