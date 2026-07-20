@@ -2,8 +2,9 @@
 
 Where the interviewer graph *branches* (one path per Turn), this one *fans out*:
 each completed question is scored by its own concurrent LLM call dispatched with
-the Send API, the results are gathered through an `operator.add` reducer on
-`scores`, and one call assesses the Session as a whole.
+the Send API — one `score_answer` per spoken question, one `score_submission`
+per DSA question — the results are gathered through an `operator.add` reducer
+on `scores`, and one call assesses the Session as a whole.
 
 Nodes here return only the keys they change. Spreading the whole state
 (`{**state, ...}`) would re-emit `scores` and the reducer would add the list to
@@ -17,7 +18,13 @@ from typing import Annotated, TypedDict
 from langgraph.graph import END, StateGraph
 from langgraph.types import Send
 
-from .providers import DIMENSIONS, LLMProvider, ProviderError, ProviderUnavailableError
+from .providers import (
+    DIMENSIONS,
+    DSA_DIMENSIONS,
+    LLMProvider,
+    ProviderError,
+    ProviderUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +36,7 @@ class EvaluationState(TypedDict):
     domain: str
     completed: list[dict]
     units: list[dict]
+    dsa_units: list[dict]
     scores: Annotated[list[dict], operator.add]
     assessment: str
     strengths: list[str]
@@ -52,11 +60,32 @@ def aggregate_scores(scores: list[dict]) -> dict[str, float | None]:
     }
 
 
+def aggregate_submission_scores(scores: list[dict]) -> dict:
+    """The DSA section's aggregate: mean per code Dimension over judged
+    entries, plus total Hints used (ADR 0012 names it as a scoring input).
+
+    Facts aggregate over every entry; judgment averages skip unscored and
+    skipped ones for the same reason aggregate_scores does.
+    """
+    judged = [s for s in scores if not s.get("skipped") and not s.get("unscored")]
+    if judged:
+        averages = {
+            dimension: round(sum(s[dimension] for s in judged) / len(judged), 1)
+            for dimension in DSA_DIMENSIONS
+        }
+    else:
+        averages = {dimension: None for dimension in DSA_DIMENSIONS}
+    return {
+        "averages": averages,
+        "hints_used": sum(s.get("hints", 0) for s in scores),
+    }
+
+
 def build_evaluator_graph(provider: LLMProvider):
     """Compile the fan-out/gather evaluation graph for the given provider."""
 
     def plan_evaluation(state: EvaluationState) -> dict:
-        units, skipped = [], []
+        units, dsa_units, scores = [], [], []
         for index, record in enumerate(state["completed"]):
             base = {
                 "index": index,
@@ -64,7 +93,28 @@ def build_evaluator_graph(provider: LLMProvider):
                 "topic": record["topic"],
                 "difficulty": record["difficulty"],
             }
-            if record["answered"]:
+            if record.get("stage") == "dsa":
+                watch = record.get("watch", {})
+                dsa_base = {
+                    **base,
+                    "kind": "dsa",
+                    "hints": watch.get("hints", 0),
+                    "runs": watch.get("runs", 0),
+                }
+                if "submission" in record:
+                    dsa_units.append(
+                        {
+                            **dsa_base,
+                            "submission": record["submission"],
+                            "answers": record["answers"],
+                        }
+                    )
+                else:
+                    # Defensive: the Submission is the only way past a coding
+                    # question (ADR 0017/0019), so this should be impossible -
+                    # but nothing to score must mean no LLM call.
+                    scores.append({**dsa_base, "skipped": True})
+            elif record["answered"]:
                 units.append(
                     {
                         **base,
@@ -73,13 +123,13 @@ def build_evaluator_graph(provider: LLMProvider):
                     }
                 )
             else:
-                skipped.append({**base, "skipped": True})
-        return {"units": units, "scores": skipped}
+                scores.append({**base, "skipped": True})
+        return {"units": units, "dsa_units": dsa_units, "scores": scores}
 
     def fan_out_to_scorers(state: EvaluationState):
-        if not state["units"]:
-            return "assess"
-        return [Send("score_answer", {"unit": unit}) for unit in state["units"]]
+        sends = [Send("score_answer", {"unit": unit}) for unit in state["units"]]
+        sends += [Send("score_submission", {"unit": unit}) for unit in state["dsa_units"]]
+        return sends or "assess"
 
     async def score_answer(payload: dict) -> dict:
         unit = payload["unit"]
@@ -111,6 +161,53 @@ def build_evaluator_graph(provider: LLMProvider):
             scored = {**base, "unscored": True, "retryable": isinstance(exc, ProviderUnavailableError)}
         return {"scores": [scored]}
 
+    async def score_submission(payload: dict) -> dict:
+        unit = payload["unit"]
+        submission = unit["submission"]
+        base = {
+            "index": unit["index"],
+            "question": unit["question"],
+            "topic": unit["topic"],
+            "difficulty": unit["difficulty"],
+            "kind": "dsa",
+            "tests": {
+                "status": submission["status"],
+                "passed": submission["passed"],
+                "total": submission["total"],
+            },
+            "hints": unit["hints"],
+            "runs": unit["runs"],
+        }
+        try:
+            score = await provider.evaluate_submission(
+                question=unit["question"],
+                code=submission["code"],
+                results_summary=(
+                    f"status {submission['status']}, "
+                    f"passed {submission['passed']} of {submission['total']}"
+                ),
+                discussion=unit["answers"],
+                hints_used=unit["hints"],
+                runs=unit["runs"],
+            )
+            scored = {
+                **base,
+                "code_quality": score.code_quality,
+                "approach": score.approach,
+                "comment": score.comment,
+            }
+        except ProviderError as exc:
+            # The judged half fails alone: the entry keeps its test facts.
+            # Never logger.exception here - a chained httpx traceback can carry
+            # Gemini's API key (ADR 0013).
+            logger.warning("could not score submission %r: %s", unit["question"], exc)
+            scored = {
+                **base,
+                "unscored": True,
+                "retryable": isinstance(exc, ProviderUnavailableError),
+            }
+        return {"scores": [scored]}
+
     async def assess(state: EvaluationState) -> dict:
         ordered = sorted(state["scores"], key=lambda s: s["index"])
         try:
@@ -133,13 +230,15 @@ def build_evaluator_graph(provider: LLMProvider):
     graph = StateGraph(EvaluationState)
     graph.add_node("plan_evaluation", plan_evaluation)
     graph.add_node("score_answer", score_answer)
+    graph.add_node("score_submission", score_submission)
     graph.add_node("assess", assess)
 
     graph.set_entry_point("plan_evaluation")
     graph.add_conditional_edges(
-        "plan_evaluation", fan_out_to_scorers, ["score_answer", "assess"]
+        "plan_evaluation", fan_out_to_scorers, ["score_answer", "score_submission", "assess"]
     )
     graph.add_edge("score_answer", "assess")
+    graph.add_edge("score_submission", "assess")
     graph.add_edge("assess", END)
 
     return graph.compile()
@@ -149,16 +248,17 @@ async def evaluate_session(
     compiled_graph, session_id: str, domain: str, completed: list[dict]
 ) -> dict:
     """Run the evaluation pass and return the Candidate-facing Evaluation."""
-    # The intro is an ice-breaker and the DSA round is scored by a future
-    # code-aware evaluator, not this speech rubric (ADR 0015/0017). Records
-    # without a stage predate the phased Session and are all real questions.
-    completed = [r for r in completed if r.get("stage") not in ("intro", "dsa")]
+    # The intro is an ice-breaker and is never scored (ADR 0015). DSA records
+    # are scored by score_submission since ADR 0020. Records without a stage
+    # predate the phased Session and are all real spoken questions.
+    completed = [r for r in completed if r.get("stage") != "intro"]
     result = await compiled_graph.ainvoke(
         {
             "session_id": session_id,
             "domain": domain,
             "completed": completed,
             "units": [],
+            "dsa_units": [],
             "scores": [],
             "assessment": "",
             "strengths": [],
@@ -167,22 +267,30 @@ async def evaluate_session(
         }
     )
     ordered = sorted(result["scores"], key=lambda s: s["index"])
-    answered = sum(1 for s in ordered if not s.get("skipped"))
+    spoken = [s for s in ordered if s.get("kind") != "dsa"]
+    dsa = [s for s in ordered if s.get("kind") == "dsa"]
+    answered = sum(1 for s in spoken if not s.get("skipped"))
     retryable_failure = result["assessment_retryable"] or any(
         s.get("retryable") for s in ordered
     )
+
+    def _public(s: dict) -> dict:
+        # `index`/`retryable` are internal ordering/caching details and `kind`
+        # is the reducer's routing tag - none are part of the Evaluation.
+        return {k: v for k, v in s.items() if k not in ("index", "retryable", "kind")}
+
     return {
         "session_id": session_id,
         "domain": domain,
-        "averages": aggregate_scores(ordered),
-        "coverage": {"answered": answered, "total": len(ordered)},
+        "averages": aggregate_scores(spoken),
+        "coverage": {"answered": answered, "total": len(spoken)},
         "assessment": result["assessment"],
         "strengths": result["strengths"],
         "improvements": result["improvements"],
-        # `index`/`retryable` are internal ordering/caching details, not part
-        # of the Candidate-facing Evaluation.
-        "questions": [
-            {k: v for k, v in s.items() if k not in ("index", "retryable")} for s in ordered
-        ],
+        "questions": [_public(s) for s in spoken],
+        "dsa": {
+            **aggregate_submission_scores(dsa),
+            "questions": [_public(s) for s in dsa],
+        },
         "retryable_failure": retryable_failure,
     }
