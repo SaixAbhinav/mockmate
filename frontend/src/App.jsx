@@ -559,6 +559,54 @@ function App() {
               )}
             </div>
           ))}
+
+          {evaluation.dsa && evaluation.dsa.questions.length > 0 && (
+            <>
+              <h3>Coding round</h3>
+              <div className="chips">
+                {Object.entries(evaluation.dsa.averages).map(([dimension, value]) => (
+                  <span key={dimension} className="score-chip">
+                    {dimension.replace('_', ' ')}: <strong>{value ?? '—'}</strong>/5
+                  </span>
+                ))}
+                <span className="score-chip coverage">
+                  hints used <strong>{evaluation.dsa.hints_used}</strong>
+                </span>
+              </div>
+              {evaluation.dsa.questions.map((q, i) => (
+                <div key={i} className="evaluation-question">
+                  <p className="evaluation-question-text">{q.question}</p>
+                  {q.skipped ? (
+                    <p className="hint">Never submitted</p>
+                  ) : (
+                    <div className="chips">
+                      <span className="score-chip coverage">
+                        tests: <strong>{q.tests.passed}</strong>/{q.tests.total}
+                        {q.tests.status !== 'ok' && ` (${q.tests.status})`}
+                      </span>
+                      {!q.unscored && (
+                        <>
+                          <span className="score-chip">
+                            code quality: <strong>{q.code_quality}</strong>/5
+                          </span>
+                          <span className="score-chip">
+                            approach: <strong>{q.approach}</strong>/5
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {q.unscored && <p className="hint">The code itself couldn't be scored</p>}
+                  {q.comment && <p>{q.comment}</p>}
+                  {(q.hints > 0 || q.runs > 0) && (
+                    <p className="hint">
+                      {q.hints} hint(s) · {q.runs} test run(s) while coding
+                    </p>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
         </section>
       )}
 
