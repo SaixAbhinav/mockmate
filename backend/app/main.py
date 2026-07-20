@@ -196,6 +196,36 @@ class Coverage(BaseModel):
     total: int
 
 
+class SubmissionTests(BaseModel):
+    """The Runner's verdict on a Submission — computed facts, never judged."""
+
+    status: str
+    passed: int
+    total: int
+
+
+class DsaQuestionScore(BaseModel):
+    question: str
+    topic: str
+    difficulty: str
+    tests: SubmissionTests | None = None  # absent only for the defensive never-submitted case
+    code_quality: int | None = None
+    approach: int | None = None
+    comment: str | None = None
+    hints: int = 0
+    runs: int = 0
+    skipped: bool = False
+    unscored: bool = False
+
+
+class DsaSection(BaseModel):
+    """The coding round's half of the Evaluation (ADR 0020)."""
+
+    averages: dict[str, float | None]
+    hints_used: int
+    questions: list[DsaQuestionScore]
+
+
 class EvaluationResponse(BaseModel):
     session_id: str
     domain: str
@@ -205,6 +235,7 @@ class EvaluationResponse(BaseModel):
     strengths: list[str]
     improvements: list[str]
     questions: list[QuestionScore]
+    dsa: DsaSection
 
 
 def _progress(state: InterviewState) -> tuple[int, int]:
