@@ -126,6 +126,22 @@ def test_evaluation_returns_scores_for_finished_session(client):
     assert 1 <= first["correctness"] <= 5
 
 
+def test_evaluation_includes_the_coding_round(client):
+    session_id = _finish_session(client)
+
+    data = client.get(f"/api/session/{session_id}/evaluation").json()
+
+    dsa = data["dsa"]
+    assert len(dsa["questions"]) == 2  # one easier + one harder (ADR 0016)
+    entry = dsa["questions"][0]
+    # DSA_STUB_CODE ("x = 1") never defines the function: the Runner reports
+    # status "error" with zero cases - real facts, even in the keyless demo.
+    assert entry["tests"] == {"status": "error", "passed": 0, "total": 0}
+    assert entry["code_quality"] == 3  # the scripted provider's canned judgment
+    assert set(dsa["averages"]) == {"code_quality", "approach"}
+    assert dsa["hints_used"] == 0
+
+
 def test_evaluation_is_cached_per_session(client, monkeypatch):
     from app import main as main_module
 
@@ -213,6 +229,11 @@ def test_evaluation_with_retryable_failure_is_not_cached(client, monkeypatch):
             "strengths": [],
             "improvements": [],
             "questions": [],
+            "dsa": {
+                "averages": {"code_quality": None, "approach": None},
+                "hints_used": 0,
+                "questions": [],
+            },
             "retryable_failure": True,
         }
 
