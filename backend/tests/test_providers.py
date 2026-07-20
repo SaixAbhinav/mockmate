@@ -14,7 +14,9 @@ from app.providers import (
     ProviderMalformedError,
     ProviderUnavailableError,
     ScriptedProvider,
+    SubmissionScore,
     WatchDecision,
+    _assess_user_turn,
     get_provider,
 )
 
@@ -327,6 +329,13 @@ class OneSidedProvider:
     async def coding_chat(self, question, code, history, utterance):
         return await self._respond("coding_chat", f"{self.name} chat")
 
+    async def evaluate_submission(
+        self, question, code, results_summary, discussion, hints_used, runs
+    ):
+        return await self._respond(
+            "evaluate_submission", SubmissionScore(3, 3, f"{self.name} submission")
+        )
+
 
 async def test_failover_returns_primary_result_without_touching_secondary():
     primary, secondary = OneSidedProvider("primary"), OneSidedProvider("secondary")
@@ -608,3 +617,100 @@ async def test_failover_delegates_coding_chat():
     )
 
     assert reply == "secondary chat"
+
+
+# --- Scoring the coding round (ADR 0020) ---
+
+
+async def test_scripted_provider_scores_a_submission():
+    provider = ScriptedProvider()
+
+    score = await provider.evaluate_submission(
+        question="Q",
+        code="def f(nums):\n    return sum(nums)\n",
+        results_summary="status ok, passed 2 of 4",
+        discussion=["I summed the list."],
+        hints_used=1,
+        runs=3,
+    )
+
+    assert (score.code_quality, score.approach) == (3, 3)
+    assert score.comment
+
+
+async def test_groq_evaluate_submission_parses_a_score(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response(
+            '{"code_quality": 4, "approach": 3, "comment": "Clean loop; missed the empty case."}'
+        )
+    )
+    provider = GroqProvider(api_key="fake-key")
+
+    score = await provider.evaluate_submission(
+        question="Q",
+        code="def f(): pass",
+        results_summary="status ok, passed 2 of 4",
+        discussion=[],
+        hints_used=0,
+        runs=1,
+    )
+
+    assert score == SubmissionScore(
+        code_quality=4, approach=3, comment="Clean loop; missed the empty case."
+    )
+
+
+async def test_groq_evaluate_submission_rejects_out_of_range_scores(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        groq_chat_response('{"code_quality": 9, "approach": 3, "comment": "x"}')
+    )
+    provider = GroqProvider(api_key="fake-key")
+
+    with pytest.raises(ProviderMalformedError):
+        await provider.evaluate_submission(
+            question="Q", code="c", results_summary="s", discussion=[], hints_used=0, runs=0
+        )
+
+
+async def test_groq_evaluate_submission_rejects_missing_fields(fake_groq_client):
+    fake_groq_client.response = FakeResponse(groq_chat_response('{"code_quality": 4}'))
+    provider = GroqProvider(api_key="fake-key")
+
+    with pytest.raises(ProviderMalformedError):
+        await provider.evaluate_submission(
+            question="Q", code="c", results_summary="s", discussion=[], hints_used=0, runs=0
+        )
+
+
+async def test_failover_delegates_evaluate_submission():
+    primary = OneSidedProvider("primary", error=ProviderUnavailableError("429"))
+    secondary = OneSidedProvider("secondary")
+    provider = FailoverProvider(primary, secondary)
+
+    score = await provider.evaluate_submission(
+        question="Q", code="c", results_summary="s", discussion=[], hints_used=0, runs=0
+    )
+
+    assert score.comment == "secondary submission"
+
+
+async def test_assess_user_turn_formats_a_coding_line():
+    text = _assess_user_turn(
+        [
+            {"question": "Q1", "correctness": 4, "depth": 3, "clarity": 4, "comment": "ok"},
+            {
+                "question": "Implement running_sum",
+                "kind": "dsa",
+                "tests": {"status": "ok", "passed": 3, "total": 4},
+                "code_quality": 4,
+                "approach": 3,
+                "comment": "solid",
+                "hints": 1,
+                "runs": 2,
+            },
+        ]
+    )
+
+    assert "passed 3 of 4" in text
+    assert "code quality 4" in text
+    assert "1 hint(s)" in text

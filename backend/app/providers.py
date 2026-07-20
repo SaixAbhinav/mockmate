@@ -68,6 +68,24 @@ ASSESS_SYSTEM_PROMPT = (
     '{"assessment": string, "strengths": [string], "improvements": [string]}.'
 )
 
+EVALUATE_SUBMISSION_SYSTEM_PROMPT = (
+    "You are evaluating the coding round of a completed mock technical "
+    "interview. You are given the coding question, the candidate's submitted "
+    "Python code, the objective test results, everything they said in the "
+    "discussion after submitting, and how many hints the interviewer gave and "
+    "how many times they ran the tests while working. Correctness is already "
+    "measured by the tests — do not re-judge whether the code passes. Score "
+    "two dimensions, each an integer from 1 to 5: 'code_quality' (readable, "
+    "idiomatic Python that handles edge cases) and 'approach' (a sound "
+    "algorithm for the problem, and how well the candidate explained and "
+    "defended it in the discussion). Hint and run counts are context about "
+    "how independently they worked — weigh them with judgment, never as a "
+    "mechanical penalty. Also write one sentence of specific, actionable "
+    "feedback about the code itself. Do not be generous: 3 means adequate, "
+    "5 means excellent. Respond with strict JSON only: "
+    '{"code_quality": int, "approach": int, "comment": string}.'
+)
+
 WARM_UP_QUESTIONS_SYSTEM_PROMPT = (
     "You are preparing the warm-up round of a mock technical interview. You "
     "are given the interview domain and the candidate's resume text. Write "
@@ -132,6 +150,8 @@ WATCH_ACTIONS = ("silent", "ask", "hint")
 
 DIMENSIONS = ("correctness", "depth", "clarity")
 
+DSA_DIMENSIONS = ("code_quality", "approach")
+
 
 class ProviderError(Exception):
     """Base: the provider could not give a usable answer."""
@@ -159,6 +179,19 @@ class AnswerScore:
     correctness: int
     depth: int
     clarity: int
+    comment: str
+
+
+@dataclass(frozen=True)
+class SubmissionScore:
+    """The judged half of one DSA question's Score (ADR 0020).
+
+    Correctness is not here on purpose: it comes from the Runner's test
+    results, which the model is told not to re-judge.
+    """
+
+    code_quality: int
+    approach: int
     comment: str
 
 
@@ -204,6 +237,15 @@ class LLMProvider(Protocol):
 
     async def assess_session(self, scores: list[dict]) -> Assessment:
         """Overall assessment from per-question Scores. Raises ProviderError on failure."""
+        ...
+
+    async def evaluate_submission(
+        self, question: str, code: str, results_summary: str,
+        discussion: list[str], hints_used: int, runs: int,
+    ) -> SubmissionScore:
+        """Judge one DSA Submission's code quality and approach (ADR 0020).
+        Correctness comes from the test results, not from this call.
+        Raises ProviderError on failure — the caller marks the entry unscored."""
         ...
 
     async def generate_warm_up_questions(
@@ -268,10 +310,26 @@ def _evaluate_user_turn(question: str, follow_up_hints: list[str], answers: list
     )
 
 
+def _evaluate_submission_user_turn(
+    question: str, code: str, results_summary: str,
+    discussion: list[str], hints_used: int, runs: int,
+) -> str:
+    said = "\n".join(f"- {a}" for a in discussion) or "- (nothing)"
+    return (
+        f"Coding question: {question}\n"
+        f"Submitted code:\n{code}\n"
+        f"Test results: {results_summary}\n"
+        f"Hints given while coding: {hints_used}; test runs while coding: {runs}\n"
+        f"What the candidate said in the discussion:\n{said}"
+    )
+
+
 def _assess_user_turn(scores: list[dict]) -> str:
     lines = []
     for s in scores:
-        if s.get("skipped"):
+        if s.get("kind") == "dsa":
+            lines.append(_assess_coding_line(s))
+        elif s.get("skipped"):
             lines.append(f"- {s['question']}: never answered")
         elif s.get("unscored") or not all(k in s for k in (*DIMENSIONS, "comment")):
             lines.append(f"- {s['question']}: could not be scored")
@@ -281,6 +339,22 @@ def _assess_user_turn(scores: list[dict]) -> str:
                 f"depth {s['depth']}, clarity {s['clarity']} — {s['comment']}"
             )
     return "Per-question results:\n" + "\n".join(lines)
+
+
+def _assess_coding_line(s: dict) -> str:
+    """One DSA entry for the assessment prompt: facts first, judgment second."""
+    tests = s.get("tests")
+    outcome = (
+        f"tests {tests['status']}, passed {tests['passed']} of {tests['total']}"
+        if tests
+        else "never submitted"
+    )
+    if not all(k in s for k in (*DSA_DIMENSIONS, "comment")):
+        return f"- {s['question']} (coding): {outcome}; the code itself could not be scored"
+    return (
+        f"- {s['question']} (coding): {outcome}; code quality {s['code_quality']}, "
+        f"approach {s['approach']}, {s.get('hints', 0)} hint(s) used — {s['comment']}"
+    )
 
 
 def _warm_up_user_turn(resume_text: str, domain: str) -> str:
@@ -377,6 +451,21 @@ def _parse_score(content: str) -> AnswerScore:
     return AnswerScore(**values, comment=comment)
 
 
+def _parse_submission_score(content: str) -> SubmissionScore:
+    try:
+        data = json.loads(content)
+        values = {d: int(data[d]) for d in DSA_DIMENSIONS}
+        comment = data["comment"]
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise ProviderMalformedError(f"malformed submission score: {content!r}") from exc
+    for dimension, value in values.items():
+        if not 1 <= value <= 5:
+            raise ProviderMalformedError(f"{dimension} out of range 1-5: {value}")
+    if not isinstance(comment, str):
+        raise ProviderMalformedError(f"comment must be a string: {comment!r}")
+    return SubmissionScore(**values, comment=comment)
+
+
 def _parse_assessment(content: str) -> Assessment:
     try:
         data = json.loads(content)
@@ -433,6 +522,21 @@ class GroqProvider:
             {"role": "user", "content": _assess_user_turn(scores)},
         ]
         return _parse_assessment(await self._chat_json(messages, max_tokens=500))
+
+    async def evaluate_submission(
+        self, question: str, code: str, results_summary: str,
+        discussion: list[str], hints_used: int, runs: int,
+    ) -> SubmissionScore:
+        messages = [
+            {"role": "system", "content": EVALUATE_SUBMISSION_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": _evaluate_submission_user_turn(
+                    question, code, results_summary, discussion, hints_used, runs
+                ),
+            },
+        ]
+        return _parse_submission_score(await self._chat_json(messages, max_tokens=300))
 
     async def generate_warm_up_questions(
         self, resume_text: str, domain: str
@@ -554,6 +658,28 @@ class GeminiProvider:
             ASSESS_SYSTEM_PROMPT, contents, response_mime_type="application/json"
         )
         return _parse_assessment(content)
+
+    async def evaluate_submission(
+        self, question: str, code: str, results_summary: str,
+        discussion: list[str], hints_used: int, runs: int,
+    ) -> SubmissionScore:
+        contents = [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": _evaluate_submission_user_turn(
+                            question, code, results_summary, discussion, hints_used, runs
+                        )
+                    }
+                ],
+            }
+        ]
+        content = await self._generate(
+            EVALUATE_SUBMISSION_SYSTEM_PROMPT, contents,
+            response_mime_type="application/json",
+        )
+        return _parse_submission_score(content)
 
     async def generate_warm_up_questions(
         self, resume_text: str, domain: str
@@ -696,6 +822,18 @@ class ScriptedProvider:
             improvements=["Add an API key to get real feedback"],
         )
 
+    async def evaluate_submission(
+        self, question: str, code: str, results_summary: str,
+        discussion: list[str], hints_used: int, runs: int,
+    ) -> SubmissionScore:
+        # The judgment is canned, but the entry's test facts are real — the
+        # keyless demo shows genuine pass/fail (ADR 0020).
+        return SubmissionScore(
+            code_quality=3,
+            approach=3,
+            comment="Scripted demo score — add an API key for a real code review.",
+        )
+
     async def generate_warm_up_questions(
         self, resume_text: str, domain: str
     ) -> list[dict]:
@@ -788,6 +926,20 @@ class FailoverProvider:
 
     async def assess_session(self, scores: list[dict]) -> Assessment:
         return await self._call("assess_session", scores=scores)
+
+    async def evaluate_submission(
+        self, question: str, code: str, results_summary: str,
+        discussion: list[str], hints_used: int, runs: int,
+    ) -> SubmissionScore:
+        return await self._call(
+            "evaluate_submission",
+            question=question,
+            code=code,
+            results_summary=results_summary,
+            discussion=discussion,
+            hints_used=hints_used,
+            runs=runs,
+        )
 
     async def generate_warm_up_questions(
         self, resume_text: str, domain: str
