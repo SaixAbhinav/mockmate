@@ -23,14 +23,13 @@ key configured, provider failures fail over automatically.
 
 ## Run it
 
-Backend (Python 3.11+):
+Backend (Python 3.11+, [uv](https://docs.astral.sh/uv/)):
 
 ```bash
 cd backend
-python -m venv .venv
-.venv\Scripts\activate      # Windows
-pip install -r requirements.txt
-uvicorn app.main:app --port 8000
+uv venv
+uv pip install -r requirements.txt
+uv run uvicorn app.main:app --port 8000
 ```
 
 Frontend (Node 20+):
@@ -60,8 +59,9 @@ voice input is unavailable and the text box is the only way to answer.
 
 ```bash
 cd backend
-pip install -r requirements-dev.txt
-pytest
+uv venv
+uv pip install -r requirements-dev.txt
+uv run pytest
 ```
 
 184 passed.
