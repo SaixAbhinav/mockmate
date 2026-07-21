@@ -20,3 +20,7 @@ at this stage.
 - Swapping to SQLite later — needed once accounts (ADR 0009) make sessions
   Candidate-scoped — is a config/adapter change, not a rewrite.
 - No persistence across backend restarts until that swap happens.
+
+The promised interface is built in ADR 0021 (`SessionStore`,
+`backend/app/session_store.py`); this ADR's decision to stay in-memory
+for now is otherwise unchanged.
