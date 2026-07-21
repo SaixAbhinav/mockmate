@@ -596,6 +596,8 @@ async def dsa_check_in(session_id: str, req: CheckInRequest) -> CheckInResponse:
 
 @app.get("/api/session/{session_id}/evaluation", response_model=EvaluationResponse)
 async def evaluation(session_id: str) -> EvaluationResponse:
+    # Evaluations are cached per Session: the Evaluation is stable once a Session
+    # is finished, and re-running it would re-bill nine LLM calls on every refresh.
     store = get_store()
     state = await store.get(session_id)
     if state is None:
