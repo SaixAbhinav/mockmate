@@ -36,6 +36,7 @@ from .evaluator import build_evaluator_graph, evaluate_session
 from .providers import ProviderError, ProviderUnavailableError, WatchDecision, get_provider
 from .resume import ResumeError, extract_resume_text
 from .runner import RunResult, run_tests, summarize_run
+from .session_store import get_store
 from .stt import SttUnavailableError, transcribe
 from .tts import DEFAULT_VOICE, VOICES, synthesize
 from .watcher import (
@@ -69,11 +70,7 @@ app.add_middleware(
 
 SUPPORTED_DOMAINS = {"ml_genai"}
 
-_sessions: dict[str, InterviewState] = {}
-
-# Evaluations are cached per Session: the Evaluation is stable once a Session is
-# finished, and re-running it would re-bill nine LLM calls on every refresh.
-_evaluations: dict[str, dict] = {}
+# Sessions and Evaluations live behind `SessionStore` (ADR 0007, ADR 0021).
 
 # One lock per Session. The cache check straddles an await, so without this two
 # concurrent requests both miss and both score. React's <StrictMode> makes that a
@@ -284,8 +281,8 @@ def _run_report(result: RunResult) -> RunReport:
     )
 
 
-def _current_dsa_question(session_id: str) -> tuple[InterviewState, dict]:
-    state = _sessions.get(session_id)
+async def _current_dsa_question(session_id: str) -> tuple[InterviewState, dict]:
+    state = await get_store().get(session_id)
     if state is None:
         raise HTTPException(status_code=404, detail="unknown session")
     question = state["current_question"]
@@ -298,8 +295,8 @@ def _store_watch(state: InterviewState, watch: dict) -> InterviewState:
     return {**state, "current_question": {**state["current_question"], "watch": watch}}
 
 
-def _unsubmitted_dsa_question(session_id: str) -> tuple[InterviewState, dict]:
-    state, question = _current_dsa_question(session_id)
+async def _unsubmitted_dsa_question(session_id: str) -> tuple[InterviewState, dict]:
+    state, question = await _current_dsa_question(session_id)
     if "submission" in question:
         raise HTTPException(status_code=409, detail="code was already submitted for this question")
     return state, question
@@ -310,7 +307,7 @@ async def _spoken_check_in(
 ) -> CheckInResponse:
     """Deliver an interjection: transcript first, then audio (ADR 0018)."""
     state = record_interjection(_store_watch(state, watch), remark)
-    _sessions[session_id] = state
+    await get_store().save(state)
     audio = await synthesize(remark, voice)
     return CheckInResponse(
         action=action, remark=remark, audio_b64=base64.b64encode(audio).decode()
@@ -386,7 +383,7 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
             )
 
     state = start_session(session_id, req.domain, warm_up_questions=warm_up_questions)
-    _sessions[session_id] = state
+    await get_store().save(state)
 
     audio = await synthesize(state["current_question"]["question"], req.voice)
     number, total = _progress(state)
@@ -403,7 +400,8 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
 
 @app.post("/api/session/{session_id}/answer", response_model=AnswerResponse)
 async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
-    state = _sessions.get(session_id)
+    store = get_store()
+    state = await store.get(session_id)
     if state is None:
         raise HTTPException(status_code=404, detail="unknown session")
 
@@ -434,7 +432,7 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
                 ) from exc
             watch = note_chat(watch)
         state = record_coding_chat(_store_watch(state, watch), req.transcript, reply)
-        _sessions[session_id] = state
+        await store.save(state)
         audio = await synthesize(reply, req.voice)
         number, total = _progress(state)
         return AnswerResponse(
@@ -456,7 +454,7 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
             status_code=503,
             detail="the AI provider is temporarily unavailable — please try again",
         ) from exc
-    _sessions[session_id] = state
+    await store.save(state)
 
     audio = await synthesize(state["reply"], req.voice)
     number, total = _progress(state)
@@ -476,7 +474,7 @@ async def dsa_run(session_id: str, req: DsaRunRequest) -> RunReport:
     """Run the Candidate's code against the current question's test cases.
 
     Free iteration: no LLM, no Session state change (ADR 0017)."""
-    state, question = _current_dsa_question(session_id)
+    state, question = await _current_dsa_question(session_id)
     result = await asyncio.to_thread(
         run_tests, req.code, question["function_name"], question["test_cases"]
     )
@@ -489,7 +487,7 @@ async def dsa_run(session_id: str, req: DsaRunRequest) -> RunReport:
             passed=report.passed,
             total=report.total,
         )
-        _sessions[session_id] = _store_watch(state, watch)
+        await get_store().save(_store_watch(state, watch))
     return report
 
 
@@ -497,7 +495,7 @@ async def dsa_run(session_id: str, req: DsaRunRequest) -> RunReport:
 async def dsa_submit(session_id: str, req: DsaSubmitRequest) -> DsaSubmitResponse:
     """Final Submission: run the tests, get the interviewer's spoken reaction,
     and open the discussion. Once per question (ADR 0017)."""
-    state, question = _unsubmitted_dsa_question(session_id)
+    state, question = await _unsubmitted_dsa_question(session_id)
 
     result = await asyncio.to_thread(
         run_tests, req.code, question["function_name"], question["test_cases"]
@@ -518,7 +516,7 @@ async def dsa_submit(session_id: str, req: DsaSubmitRequest) -> DsaSubmitRespons
         ) from exc
 
     state = submit_code(state, req.code, result, reaction)
-    _sessions[session_id] = state
+    await get_store().save(state)
 
     audio = await synthesize(state["reply"], req.voice)
     number, total = _progress(state)
@@ -539,10 +537,10 @@ async def dsa_snapshot(session_id: str, req: SnapshotRequest):
 
     Sent on typing pauses; no LLM, no interview movement. The first
     Snapshot starts the watcher's clock (ADR 0018)."""
-    state, question = _unsubmitted_dsa_question(session_id)
+    state, question = await _unsubmitted_dsa_question(session_id)
     now = _now()
     watch = record_snapshot(question.get("watch") or start_watch(now), req.code, now)
-    _sessions[session_id] = _store_watch(state, watch)
+    await get_store().save(_store_watch(state, watch))
     return {"received": True}
 
 
@@ -554,7 +552,7 @@ async def dsa_check_in(session_id: str, req: CheckInRequest) -> CheckInResponse:
     otherwise the server-side gates (typing-anchored interval, cooldown,
     cap) decide when a poll becomes an LLM look. Cooldowns and provider
     failures both answer silent - a poll never surfaces an error."""
-    state, question = _unsubmitted_dsa_question(session_id)
+    state, question = await _unsubmitted_dsa_question(session_id)
     now = _now()
     watch = question.get("watch") or start_watch(now)
 
@@ -565,7 +563,7 @@ async def dsa_check_in(session_id: str, req: CheckInRequest) -> CheckInResponse:
         return await _spoken_check_in(session_id, state, watch, "offer", OFFER_REMARK, req.voice)
 
     if not check_in_due(watch, now):
-        _sessions[session_id] = _store_watch(state, watch)  # persists a fresh watch
+        await get_store().save(_store_watch(state, watch))  # persists a fresh watch
         return CheckInResponse(action="silent")
 
     code = watch["code"] if watch["code"] is not None else question["starter_code"]
@@ -587,7 +585,7 @@ async def dsa_check_in(session_id: str, req: CheckInRequest) -> CheckInResponse:
     # hammered again on the next poll.
     watch = note_check_in(watch, code, now)
     if decision.action == "silent":
-        _sessions[session_id] = _store_watch(state, watch)
+        await get_store().save(_store_watch(state, watch))
         return CheckInResponse(action="silent")
 
     watch = note_interjection(watch, now, decision.action)
@@ -598,7 +596,8 @@ async def dsa_check_in(session_id: str, req: CheckInRequest) -> CheckInResponse:
 
 @app.get("/api/session/{session_id}/evaluation", response_model=EvaluationResponse)
 async def evaluation(session_id: str) -> EvaluationResponse:
-    state = _sessions.get(session_id)
+    store = get_store()
+    state = await store.get(session_id)
     if state is None:
         raise HTTPException(status_code=404, detail="unknown session")
     if state["phase"] != "done":
@@ -607,9 +606,8 @@ async def evaluation(session_id: str) -> EvaluationResponse:
     # setdefault does not await, so it is atomic on the event loop.
     lock = _evaluation_locks.setdefault(session_id, asyncio.Lock())
     async with lock:
-        if session_id in _evaluations:
-            result = _evaluations[session_id]
-        else:
+        result = await store.get_evaluation(session_id)
+        if result is None:
             graph = build_evaluator_graph(get_provider())
             result = await evaluate_session(
                 graph, session_id, state["domain"], state["completed"]
@@ -618,6 +616,6 @@ async def evaluation(session_id: str) -> EvaluationResponse:
             # baked in forever — only cache once every Score/Assessment call
             # either succeeded or failed deterministically (malformed).
             if not result["retryable_failure"]:
-                _evaluations[session_id] = result
+                await store.save_evaluation(session_id, result)
 
     return EvaluationResponse(**{k: v for k, v in result.items() if k != "retryable_failure"})

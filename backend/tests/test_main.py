@@ -620,7 +620,9 @@ def test_check_in_is_silent_before_typing_plus_the_interval(client, monkeypatch)
 
 
 def test_check_in_speaks_after_typing_plus_the_interval(client, monkeypatch):
-    from app.main import _sessions
+    import asyncio
+
+    from app.session_store import get_store
 
     session_id, clock, watcher = _watching_session(client, monkeypatch)
     _snapshot(client, session_id, EDITED_CODE)
@@ -634,7 +636,8 @@ def test_check_in_speaks_after_typing_plus_the_interval(client, monkeypatch):
     assert data["audio_b64"]
     assert watcher.watch_calls == 1
     assert watcher.last_stuck is False  # they edited since the starter
-    assert _sessions[session_id]["transcript"][-1] == {
+    state = asyncio.run(get_store().get(session_id))
+    assert state["transcript"][-1] == {
         "role": "assistant",
         "content": "Try a running total.",
     }
@@ -651,7 +654,9 @@ def test_first_look_on_unchanged_code_reports_stuck(client, monkeypatch):
 
 
 def test_two_minutes_of_silence_earns_the_offer(client, monkeypatch):
-    from app.main import _sessions
+    import asyncio
+
+    from app.session_store import get_store
 
     session_id, clock, watcher = _watching_session(client, monkeypatch)
     _check_in(client, session_id)  # arms the watch at t0
@@ -664,7 +669,8 @@ def test_two_minutes_of_silence_earns_the_offer(client, monkeypatch):
     assert data["remark"] == OFFER_REMARK
     assert data["audio_b64"]
     assert watcher.watch_calls == 0  # deterministic - no LLM involved
-    assert _sessions[session_id]["transcript"][-1] == {
+    state = asyncio.run(get_store().get(session_id))
+    assert state["transcript"][-1] == {
         "role": "assistant",
         "content": OFFER_REMARK,
     }
