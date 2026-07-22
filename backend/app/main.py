@@ -15,6 +15,7 @@ single-process demo traffic; orphaned sessions are known, deferred debt.
 import asyncio
 import base64
 import logging
+import os
 import time
 import uuid
 
@@ -56,6 +57,16 @@ from .watcher import (
 )
 
 load_dotenv()
+
+# uvicorn configures its own loggers, not ours: without this the app's logger
+# propagates to a handler-less root at the default WARNING level, so every
+# logger.info() in this package is silently discarded. LOG_LEVEL tunes it.
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    # ASCII separator on purpose: an em dash here renders as a replacement
+    # character in a cp1252 Windows console.
+    format="%(levelname)s:     %(name)s - %(message)s",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +244,29 @@ class EvaluationResponse(BaseModel):
     improvements: list[str]
     questions: list[QuestionScore]
     dsa: DsaSection
+
+
+def _stopwatch():
+    """Start a wall-clock timer; call the returned function for elapsed ms.
+
+    Turn latency is otherwise only measured client-side and end-to-end, which
+    cannot say whether a slow turn was the interviewer's LLM call or speech
+    synthesis. These two are awaited serially on every turn, so splitting them
+    is the difference between a guess and a diagnosis.
+    """
+    started = time.perf_counter()
+    return lambda: (time.perf_counter() - started) * 1000
+
+
+def _log_turn(session_id: str, stage: str, llm_ms: float, tts_ms: float) -> None:
+    logger.info(
+        "turn timing session=%s stage=%s llm_ms=%.0f tts_ms=%.0f total_ms=%.0f",
+        session_id,
+        stage,
+        llm_ms,
+        tts_ms,
+        llm_ms + tts_ms,
+    )
 
 
 def _progress(state: InterviewState) -> tuple[int, int]:
@@ -446,6 +480,7 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
         )
 
     graph = build_graph(get_provider())
+    llm = _stopwatch()
     try:
         state = await submit_answer(graph, state, req.transcript)
     except ProviderUnavailableError as exc:
@@ -454,9 +489,12 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
             status_code=503,
             detail="the AI provider is temporarily unavailable — please try again",
         ) from exc
+    llm_ms = llm()
     await store.save(state)
 
+    tts = _stopwatch()
     audio = await synthesize(state["reply"], req.voice)
+    _log_turn(session_id, _stage(state), llm_ms, tts())
     number, total = _progress(state)
     return AnswerResponse(
         reply=state["reply"],

@@ -9,6 +9,7 @@ application code.
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -884,6 +885,10 @@ class FailoverProvider:
         self.name = f"{primary.name}+{secondary.name}"
 
     async def _call(self, method: str, **kwargs):
+        # Timed in `finally` so one line covers both the plain path and the
+        # failover path (where the elapsed time spans *both* providers) — the
+        # warning below is what distinguishes them.
+        started = time.perf_counter()
         try:
             return await getattr(self._primary, method)(**kwargs)
         except ProviderUnavailableError as exc:
@@ -896,6 +901,10 @@ class FailoverProvider:
                 exc,
             )
             return await getattr(self._secondary, method)(**kwargs)
+        finally:
+            logger.info(
+                "llm call op=%s ms=%.0f", method, (time.perf_counter() - started) * 1000
+            )
 
     async def judge_answer(
         self,
