@@ -458,6 +458,10 @@ def test_clean_closing_strips_leading_whitespace():
     assert _clean_closing("   Well done.") == "Well done."
 
 
+def test_clean_closing_all_punctuation_collapses_to_empty_without_crashing():
+    assert _clean_closing(",,, .") == ""
+
+
 async def test_wrap_up_cleans_a_malformed_closing_from_the_provider():
     provider = FakeProvider(
         [Judgment("advance", "ok", True)],

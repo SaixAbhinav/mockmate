@@ -225,8 +225,10 @@ def _clean_closing(closing: str) -> str:
     restore the sentence's opening capital. The wrap-up is the last thing a
     Candidate hears (ADR 0011), so it never ships raw.
     """
+    # Trailing lstrip() is not redundant: it clears any tab/newline left sitting
+    # after the leading punctuation, which the space in the charset would miss.
     cleaned = closing.lstrip().lstrip(",;:.!?-—– ").lstrip()
-    if cleaned:
+    if cleaned:  # guard the pathological all-punctuation closing -> "" (no IndexError)
         cleaned = cleaned[0].upper() + cleaned[1:]
     return cleaned
 
