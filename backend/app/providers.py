@@ -885,25 +885,33 @@ class FailoverProvider:
         self.name = f"{primary.name}+{secondary.name}"
 
     async def _call(self, method: str, **kwargs):
-        # Timed in `finally` so one line covers both the plain path and the
-        # failover path (where the elapsed time spans *both* providers) — the
-        # warning below is what distinguishes them.
+        # `ok` is on the log line because a failed call would otherwise read
+        # exactly like a slow successful one and skew the latency picture the
+        # timing exists to give. On the failover path the elapsed time spans
+        # both providers, which is the number the Candidate actually waited.
         started = time.perf_counter()
+        ok = False
         try:
-            return await getattr(self._primary, method)(**kwargs)
-        except ProviderUnavailableError as exc:
-            # Log the provider's own message only — never the chained traceback
-            # (Gemini's key rides in its request URL, ADR 0013).
-            logger.warning(
-                "%s unavailable, failing over to %s: %s",
-                self._primary.name,
-                self._secondary.name,
-                exc,
-            )
-            return await getattr(self._secondary, method)(**kwargs)
+            try:
+                result = await getattr(self._primary, method)(**kwargs)
+            except ProviderUnavailableError as exc:
+                # Log the provider's own message only — never the chained
+                # traceback (Gemini's key rides in its request URL, ADR 0013).
+                logger.warning(
+                    "%s unavailable, failing over to %s: %s",
+                    self._primary.name,
+                    self._secondary.name,
+                    exc,
+                )
+                result = await getattr(self._secondary, method)(**kwargs)
+            ok = True  # only reached when no exception escaped
+            return result
         finally:
             logger.info(
-                "llm call op=%s ms=%.0f", method, (time.perf_counter() - started) * 1000
+                "llm call op=%s ok=%s ms=%.0f",
+                method,
+                ok,
+                (time.perf_counter() - started) * 1000,
             )
 
     async def judge_answer(

@@ -1,8 +1,30 @@
+import logging
+
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import _log_level, app
 from app.providers import ProviderUnavailableError, Judgment
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("DEBUG", logging.DEBUG),
+        ("info", logging.INFO),  # lowercase must not blow up at import
+        ("  WaRnInG  ", logging.WARNING),
+        ("verbose", logging.INFO),  # unknown name degrades, never raises
+        ("", logging.INFO),
+    ],
+)
+def test_log_level_tolerates_case_and_nonsense(monkeypatch, value, expected):
+    monkeypatch.setenv("LOG_LEVEL", value)
+    assert _log_level() == expected
+
+
+def test_log_level_defaults_to_info_when_unset(monkeypatch):
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    assert _log_level() == logging.INFO
 
 
 @pytest.fixture

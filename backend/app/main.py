@@ -58,11 +58,23 @@ from .watcher import (
 
 load_dotenv()
 
+def _log_level() -> int:
+    """Resolve LOG_LEVEL, tolerating case and nonsense.
+
+    basicConfig would raise on a lowercase or unknown name, and it raises at
+    import — so a stray `LOG_LEVEL=info` would take the whole app down at
+    startup rather than degrade to a default.
+    """
+    name = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+    level = logging.getLevelName(name)
+    return level if isinstance(level, int) else logging.INFO
+
+
 # uvicorn configures its own loggers, not ours: without this the app's logger
 # propagates to a handler-less root at the default WARNING level, so every
-# logger.info() in this package is silently discarded. LOG_LEVEL tunes it.
+# logger.info() in this package is silently discarded.
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
+    level=_log_level(),
     # ASCII separator on purpose: an em dash here renders as a replacement
     # character in a cp1252 Windows console.
     format="%(levelname)s:     %(name)s - %(message)s",
