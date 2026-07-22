@@ -201,6 +201,38 @@ def _close_out_current_question(state: InterviewState) -> list[dict]:
     return [*state["completed"], record]
 
 
+def _join_reaction(reaction: str, question: str) -> str:
+    """Join the judge's reaction to the next question as one spoken line.
+
+    The model often returns the reaction without terminal punctuation ("Great
+    summary"), so a naive space-join reads and speaks as a run-on. Add a period
+    when one is missing; an empty reaction yields just the question.
+    """
+    reaction = reaction.rstrip()
+    if not reaction:
+        return question
+    if not reaction.endswith((".", "!", "?")):
+        reaction += "."
+    return f"{reaction} {question}"
+
+
+def _clean_closing(closing: str) -> str:
+    """Sanitise the model's wrap-up before it is shown and spoken.
+
+    Sessions are anonymous (ADR 0007/0009), so the model sometimes tries to
+    address the Candidate by name and leaves a placeholder comma behind
+    (", it was a pleasure..."). Strip leading whitespace and punctuation, then
+    restore the sentence's opening capital. The wrap-up is the last thing a
+    Candidate hears (ADR 0011), so it never ships raw.
+    """
+    # Trailing lstrip() is not redundant: it clears any tab/newline left sitting
+    # after the leading punctuation, which the space in the charset would miss.
+    cleaned = closing.lstrip().lstrip(",;:.!?-—– ").lstrip()
+    if cleaned:  # guard the pathological all-punctuation closing -> "" (no IndexError)
+        cleaned = cleaned[0].upper() + cleaned[1:]
+    return cleaned
+
+
 def build_graph(provider: LLMProvider):
     async def judge_answer_depth(state: InterviewState) -> InterviewState:
         classification = "advance"
@@ -301,13 +333,13 @@ def build_graph(provider: LLMProvider):
             "current_answered": True,
             "current_answers": [],
             "transcript": transcript,
-            "reply": f"{state['reply']} {nxt['question']}",
+            "reply": _join_reaction(state["reply"], nxt["question"]),
             "phase": "asking",
         }
 
     async def wrap_up(state: InterviewState) -> InterviewState:
         completed = _close_out_current_question(state)
-        closing = await provider.wrap_up(state["transcript"])
+        closing = _clean_closing(await provider.wrap_up(state["transcript"]))
         transcript = [*state["transcript"], {"role": "assistant", "content": closing}]
         return {
             **state,

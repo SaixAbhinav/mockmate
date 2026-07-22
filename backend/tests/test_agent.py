@@ -1,6 +1,8 @@
 import pytest
 
 from app.agent import (
+    _clean_closing,
+    _join_reaction,
     build_graph,
     record_coding_chat,
     record_interjection,
@@ -401,3 +403,75 @@ async def test_completed_record_carries_the_watch_counts():
         "chats": 1,
         "runs": 1,
     }
+
+
+# --- Bug 1: the reaction and the next question must not collide (no run-on) ---
+
+
+def test_join_reaction_appends_period_when_reaction_lacks_punctuation():
+    assert _join_reaction("Great summary", "What is overfitting?") == (
+        "Great summary. What is overfitting?"
+    )
+
+
+@pytest.mark.parametrize("mark", [".", "!", "?"])
+def test_join_reaction_preserves_existing_sentence_punctuation(mark):
+    assert _join_reaction(f"Nice work{mark}", "Next?") == f"Nice work{mark} Next?"
+
+
+def test_join_reaction_ignores_trailing_whitespace_when_checking():
+    assert _join_reaction("Good.  ", "Next?") == "Good. Next?"
+
+
+def test_join_reaction_with_empty_reaction_returns_the_question_alone():
+    assert _join_reaction("", "What is overfitting?") == "What is overfitting?"
+    assert _join_reaction("   ", "What is overfitting?") == "What is overfitting?"
+
+
+async def test_advance_to_next_question_has_punctuation_between_reaction_and_question():
+    # The judge's reaction arrives without terminal punctuation (common), so the
+    # spoken/rendered reply would otherwise read as a run-on.
+    provider = FakeProvider([Judgment("advance", "Great summary", True)])
+    graph = build_graph(provider)
+    state = start_session("s1", "ml_genai", seed=1)
+    next_question_text = state["queue"][0]["question"]
+
+    state = await submit_answer(graph, state, "a full answer")
+
+    assert state["reply"] == f"Great summary. {next_question_text}"
+
+
+# --- Bug 2: the wrap-up must not open with a stray comma / name artifact ---
+
+
+def test_clean_closing_strips_leading_comma_and_capitalises():
+    assert _clean_closing(", it was a pleasure speaking with you, thank you.") == (
+        "It was a pleasure speaking with you, thank you."
+    )
+
+
+def test_clean_closing_leaves_a_well_formed_closing_untouched():
+    assert _clean_closing("Nice work today.") == "Nice work today."
+
+
+def test_clean_closing_strips_leading_whitespace():
+    assert _clean_closing("   Well done.") == "Well done."
+
+
+def test_clean_closing_all_punctuation_collapses_to_empty_without_crashing():
+    assert _clean_closing(",,, .") == ""
+
+
+async def test_wrap_up_cleans_a_malformed_closing_from_the_provider():
+    provider = FakeProvider(
+        [Judgment("advance", "ok", True)],
+        wrap_up_text=", it was a pleasure speaking with you.",
+    )
+    graph = build_graph(provider)
+    state = start_session("s1", "ml_genai", seed=1)
+
+    while state["phase"] != "done":
+        state = await submit_answer(graph, state, "answer")
+
+    assert state["reply"] == "It was a pleasure speaking with you."
+    assert state["transcript"][-1]["content"] == "It was a pleasure speaking with you."
