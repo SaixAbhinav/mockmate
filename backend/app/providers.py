@@ -37,8 +37,9 @@ JUDGE_SYSTEM_PROMPT = (
 WRAP_UP_SYSTEM_PROMPT = (
     "The mock interview is complete. Write a brief, warm one or two sentence "
     "closing remark for the candidate based on the transcript. Do not score, "
-    "grade, or critique the answers - that is a separate step. Keep it under "
-    "40 words; it is spoken aloud."
+    "grade, or critique the answers - that is a separate step. Do not address "
+    "the candidate by name - you do not know it. Keep it under 40 words; it is "
+    "spoken aloud."
 )
 
 EVALUATE_SYSTEM_PROMPT = (
