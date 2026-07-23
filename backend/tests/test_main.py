@@ -376,13 +376,20 @@ def test_keyless_demo_asks_before_assuming_the_bank(client):
 def test_candidate_can_accept_the_bank_fallback(client, monkeypatch):
     from app import main as main_module
 
-    class FailingProvider:
+    # Accepting the offer must NOT retry generation (ADR 0023): the Candidate
+    # asked for the general interview, so a transient recovery that quietly
+    # produced a tailored one would contradict the button they clicked. This
+    # provider fails loudly if called at all, proving the short-circuit.
+    calls = {"n": 0}
+
+    class MustNotBeCalledProvider:
         name = "fake"
 
         async def generate_warm_up_questions(self, resume_text):
-            raise ProviderUnavailableError("429")
+            calls["n"] += 1
+            raise AssertionError("generation must be skipped when the bank was accepted")
 
-    monkeypatch.setattr(main_module, "get_provider", lambda: FailingProvider())
+    monkeypatch.setattr(main_module, "get_provider", lambda: MustNotBeCalledProvider())
     resume_id = _upload_resume(client).json()["resume_id"]
 
     resp = client.post(
@@ -391,6 +398,7 @@ def test_candidate_can_accept_the_bank_fallback(client, monkeypatch):
 
     assert resp.status_code == 200
     data = resp.json()
+    assert calls["n"] == 0  # generation was never attempted
     assert data["total_questions"] == 6  # intro + 3 curated + 2 DSA
     assert data["warm_up_source"] == "bank"
     assert data["domain"] == "ml_genai"

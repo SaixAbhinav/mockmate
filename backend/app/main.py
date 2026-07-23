@@ -411,7 +411,11 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     session_id = str(uuid.uuid4())
 
     warm_up = None
-    if resume_text is not None:
+    # Skip generation entirely once the Candidate has accepted the bank: they
+    # asked for the general interview, so retrying could hand them a tailored
+    # one against their choice, and costs a second provider call on the failure
+    # path we already know about (ADR 0023).
+    if resume_text is not None and not req.allow_bank_fallback:
         try:
             # Empty questions (ScriptedProvider) and ProviderError both mean the
             # same thing here: no tailored interview is available (ADR 0015).
