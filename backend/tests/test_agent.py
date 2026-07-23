@@ -482,6 +482,16 @@ def test_bank_fallback_ignores_a_free_form_domain_label():
     # must still produce a Session, not a QuestionBankError.
     state = start_session("s1", "web development", seed=1)
 
+    # This exact combination - a free-form label with no generated
+    # warm_up_questions - can't arise through the real endpoint: main.py only
+    # ever passes a free-form label when generation succeeded (see
+    # test_main.py::test_session_with_resume_uses_generated_warm_up). It's
+    # deliberately synthetic here to isolate what this test actually guards:
+    # that an arbitrary Candidate-influenced string can never reach the
+    # question-bank file lookup in plan_warm_up. Proof it never does: the
+    # fallback warm-up dicts below carry the bank's own domain
+    # (FALLBACK_DOMAIN, "ml_genai") stamped by _question_to_dict, not the
+    # "web development" label that only state["domain"] holds.
     assert state["domain"] == "web development"
     warm_ups = [q for q in state["queue"] if q.get("stage") == "warm_up"]
     assert len(warm_ups) == 3

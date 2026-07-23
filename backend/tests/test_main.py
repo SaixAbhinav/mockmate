@@ -358,6 +358,21 @@ def test_generation_failure_offers_the_bank_instead_of_assuming_it(client, monke
     assert detail["fallback_domain"] == "ml_genai"
 
 
+def test_keyless_demo_asks_before_assuming_the_bank(client):
+    # No monkeypatching: the `client` fixture already strips GROQ_API_KEY and
+    # GEMINI_API_KEY, so get_provider() resolves to ScriptedProvider - the
+    # keyless zero-setup demo (ADR 0002). It returns empty `questions` on
+    # every call, which is the path every visitor without API keys hits.
+    # ADR 0023 says that must be disclosed, not silently substituted.
+    resume_id = _upload_resume(client).json()["resume_id"]
+
+    resp = client.post("/api/session", json={"resume_id": resume_id})
+
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["reason"] == "generation_unavailable"
+
+
 def test_candidate_can_accept_the_bank_fallback(client, monkeypatch):
     from app import main as main_module
 

@@ -9,6 +9,10 @@ import './App.css'
 const SNAPSHOT_DEBOUNCE_MS = 2000
 const CHECK_IN_POLL_MS = 25000
 
+// Inferred labels are already human-readable; only the curated bank's own slug
+// needs prettifying (ADR 0023).
+const DOMAIN_LABELS = { ml_genai: 'ML / GenAI' }
+
 function App() {
   const [screen, setScreen] = useState('start') // start | interview
   const [sessionDomain, setSessionDomain] = useState(null) // derived label (ADR 0023)
@@ -439,7 +443,7 @@ function App() {
         </p>
       )}
       {sessionDomain && (
-        <p className="hint">Interview field: {sessionDomain}</p>
+        <p className="hint">Interview field: {DOMAIN_LABELS[sessionDomain] ?? sessionDomain}</p>
       )}
 
       <section className="chat">
