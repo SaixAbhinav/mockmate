@@ -3,9 +3,6 @@ import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import './App.css'
 
-// Domain picker (ML/GenAI only for v1, ADR 0008).
-const DOMAINS = { ml_genai: 'ML / GenAI' }
-
 // The watching interviewer (ADR 0018): snapshot on a typing pause; poll for
 // check-ins. The backend owns the real policy (offer, interval, cooldowns,
 // cap) - the frontend just asks often and usually hears "silent".
@@ -13,8 +10,9 @@ const SNAPSHOT_DEBOUNCE_MS = 2000
 const CHECK_IN_POLL_MS = 25000
 
 function App() {
-  const [screen, setScreen] = useState('domain') // domain | interview
-  const [domain, setDomain] = useState('ml_genai')
+  const [screen, setScreen] = useState('start') // start | interview
+  const [sessionDomain, setSessionDomain] = useState(null) // derived label (ADR 0023)
+  const [fallbackOffer, setFallbackOffer] = useState(null) // 409 detail, or null
   const [sessionId, setSessionId] = useState(null)
   const [history, setHistory] = useState([])
   const [phase, setPhase] = useState(null) // null | advancing | probing | clarifying | done
@@ -133,18 +131,32 @@ function App() {
     await audio.play()
   }
 
-  async function startInterview() {
+  async function startInterview(allowBankFallback = false) {
     setError(null)
     setStatus('thinking')
     try {
       const resp = await fetch('/api/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain, voice, resume_id: resumeId }),
+        body: JSON.stringify({
+          voice,
+          resume_id: resumeId,
+          allow_bank_fallback: allowBankFallback,
+        }),
       })
+      // 409 is not an error: the backend is asking whether a general interview
+      // is acceptable, because it could not tailor one (ADR 0023).
+      if (resp.status === 409) {
+        const body = await resp.json()
+        setFallbackOffer(body.detail)
+        setStatus('idle')
+        return
+      }
       if (!resp.ok) throw new Error(`backend returned ${resp.status}`)
       const data = await resp.json()
+      setFallbackOffer(null)
       setSessionId(data.session_id)
+      setSessionDomain(data.domain)
       setHistory([{ role: 'assistant', content: data.first_question }])
       setQuestionNumber(data.question_number)
       setTotalQuestions(data.total_questions)
@@ -162,7 +174,7 @@ function App() {
   // Deliberately does NOT reset resumeId/resumeName/resumeStatus: the uploaded
   // resume stays valid for a second interview without re-uploading.
   function startNewInterview() {
-    setScreen('domain')
+    setScreen('start')
     setSessionId(null)
     setHistory([])
     setPhase(null)
@@ -178,6 +190,8 @@ function App() {
     setCode('')
     setRunReport(null)
     setDsaSubmitted(false)
+    setFallbackOffer(null)
+    setSessionDomain(null)
   }
 
   async function handleResumeChange(e) {
@@ -341,37 +355,47 @@ function App() {
     setDraft('')
   }
 
-  if (screen === 'domain') {
+  if (screen === 'start') {
     return (
       <main className="wrap">
         <header className="topbar">
           <h1>MockMate</h1>
         </header>
-        <section className="domain-picker">
+        <section className="start-panel">
           <label className="voice-row">
-            Domain:
-            <select value={domain} onChange={(e) => setDomain(e.target.value)}>
-              {Object.entries(DOMAINS).map(([id, label]) => (
-                <option key={id} value={id}>{label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="voice-row">
-            Resume (optional):
+            Resume:
             <input type="file" accept=".pdf,.txt" onChange={handleResumeChange} />
           </label>
           {resumeStatus === 'uploading' && <p className="hint">Uploading resume…</p>}
           {resumeStatus === 'ready' && (
-            <p className="hint">Warm-up questions will be grounded in {resumeName}</p>
+            <p className="hint">Your interview will be built around {resumeName}</p>
           )}
-          <button
-            onClick={startInterview}
-            disabled={status === 'thinking' || resumeStatus === 'uploading'}
-          >
-            {status === 'thinking'
-              ? (resumeId ? 'Reading your resume…' : 'Starting…')
-              : 'Start interview'}
-          </button>
+          {!resumeId && resumeStatus !== 'uploading' && (
+            <p className="hint">
+              No resume — this will be a general ML/GenAI interview.
+            </p>
+          )}
+
+          {fallbackOffer ? (
+            <div className="fallback-offer">
+              <p>{fallbackOffer.message}</p>
+              <button onClick={() => startInterview(true)} disabled={status === 'thinking'}>
+                Start the general interview
+              </button>
+              <button className="secondary" onClick={() => setFallbackOffer(null)}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => startInterview(false)}
+              disabled={status === 'thinking' || resumeStatus === 'uploading'}
+            >
+              {status === 'thinking'
+                ? (resumeId ? 'Reading your resume…' : 'Starting…')
+                : 'Start interview'}
+            </button>
+          )}
         </section>
         {error && <p className="error">{error}</p>}
       </main>
@@ -409,6 +433,9 @@ function App() {
         <p className="hint">
           Resume grounding unavailable — this warm-up uses curated questions.
         </p>
+      )}
+      {sessionDomain && (
+        <p className="hint">Interview field: {sessionDomain}</p>
       )}
 
       <section className="chat">
