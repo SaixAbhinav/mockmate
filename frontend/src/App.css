@@ -79,6 +79,12 @@ button.recording {
   gap: 0.5rem;
 }
 
+button.secondary {
+  background: transparent;
+  border: 1px solid #555;
+  color: #888;
+}
+
 .messages .wrap-up {
   color: #7ab;
   font-style: italic;

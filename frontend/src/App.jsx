@@ -382,7 +382,11 @@ function App() {
               <button onClick={() => startInterview(true)} disabled={status === 'thinking'}>
                 Start the general interview
               </button>
-              <button className="secondary" onClick={() => setFallbackOffer(null)}>
+              <button
+                className="secondary"
+                onClick={() => setFallbackOffer(null)}
+                disabled={status === 'thinking'}
+              >
                 Cancel
               </button>
             </div>
