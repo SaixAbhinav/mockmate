@@ -17,7 +17,7 @@ from typing import TypedDict
 from langgraph.graph import END, StateGraph
 
 from .providers import LLMProvider, ProviderMalformedError
-from .questions import Question, plan_dsa, plan_warm_up
+from .questions import FALLBACK_DOMAIN, Question, plan_dsa, plan_warm_up
 from .runner import RunResult, summarize_run
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ def start_session(
     else:
         warm_up = [
             {**_question_to_dict(q), "stage": "warm_up"}
-            for q in plan_warm_up(domain, seed=seed)
+            for q in plan_warm_up(FALLBACK_DOMAIN, seed=seed)
         ]
     dsa = [{**asdict(q), "stage": "dsa"} for q in plan_dsa(seed=seed)]
     queue = [dict(INTRO_QUESTION), *warm_up, *dsa]

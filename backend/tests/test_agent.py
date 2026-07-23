@@ -475,3 +475,13 @@ async def test_wrap_up_cleans_a_malformed_closing_from_the_provider():
 
     assert state["reply"] == "It was a pleasure speaking with you."
     assert state["transcript"][-1]["content"] == "It was a pleasure speaking with you."
+
+
+def test_bank_fallback_ignores_a_free_form_domain_label():
+    # ADR 0023: `domain` is a display label. A label with no YAML file behind it
+    # must still produce a Session, not a QuestionBankError.
+    state = start_session("s1", "web development", seed=1)
+
+    assert state["domain"] == "web development"
+    warm_ups = [q for q in state["queue"] if q.get("stage") == "warm_up"]
+    assert len(warm_ups) == 3
