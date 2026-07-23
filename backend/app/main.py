@@ -35,6 +35,7 @@ from .agent import (
 )
 from .evaluator import build_evaluator_graph, evaluate_session
 from .providers import ProviderError, ProviderUnavailableError, WatchDecision, get_provider
+from .questions import FALLBACK_DOMAIN
 from .resume import ResumeError, extract_resume_text
 from .runner import RunResult, run_tests, summarize_run
 from .session_store import get_store
@@ -91,8 +92,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SUPPORTED_DOMAINS = {"ml_genai"}
-
 # Sessions and Evaluations live behind `SessionStore` (ADR 0007, ADR 0021).
 
 # One lock per Session. The cache check straddles an await, so without this two
@@ -110,9 +109,11 @@ _now = time.monotonic
 
 
 class CreateSessionRequest(BaseModel):
-    domain: str
     voice: str = DEFAULT_VOICE
     resume_id: str | None = None
+    # Set only after the Candidate has been told generation failed and chose to
+    # continue anyway (ADR 0023). Never defaulted true.
+    allow_bank_fallback: bool = False
 
 
 class CreateSessionResponse(BaseModel):
@@ -123,6 +124,7 @@ class CreateSessionResponse(BaseModel):
     total_questions: int
     stage: str
     warm_up_source: str  # "resume" | "bank" — the Candidate can tell which interview they got
+    domain: str  # inferred from the resume, or the fallback bank's own (ADR 0023)
 
 
 class AnswerRequest(BaseModel):
@@ -400,9 +402,6 @@ async def upload_resume(file: UploadFile):
 
 @app.post("/api/session", response_model=CreateSessionResponse)
 async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
-    if req.domain not in SUPPORTED_DOMAINS:
-        raise HTTPException(status_code=400, detail=f"unsupported domain {req.domain!r}")
-
     resume_text = None
     if req.resume_id is not None:
         resume_text = _resumes.get(req.resume_id)
@@ -411,24 +410,42 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
 
     session_id = str(uuid.uuid4())
 
-    warm_up_questions = None
+    warm_up = None
     if resume_text is not None:
         try:
-            # Empty list (ScriptedProvider) and ProviderError both mean the
-            # same thing here: use the curated fallback. A failed generation
-            # never blocks a Session (ADR 0015).
-            warm_up_questions = (
-                await get_provider().generate_warm_up_questions(resume_text, req.domain)
-                or None
-            )
+            # Empty questions (ScriptedProvider) and ProviderError both mean the
+            # same thing here: no tailored interview is available (ADR 0015).
+            generated = await get_provider().generate_warm_up_questions(resume_text)
+            warm_up = generated if generated.questions else None
         except ProviderError as exc:
             logger.warning(
-                "warm-up generation failed for session %s, using the question bank (%s)",
+                "warm-up generation failed for session %s (%s)",
                 session_id,
                 type(exc).__name__,
             )
 
-    state = start_session(session_id, req.domain, warm_up_questions=warm_up_questions)
+    # A Candidate who uploaded a resume was promised a tailored interview. If we
+    # cannot give them one, say so before the Session exists rather than after
+    # it has already started (ADR 0023) - they choose the general interview.
+    if resume_text is not None and warm_up is None and not req.allow_bank_fallback:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "reason": "generation_unavailable",
+                "fallback_domain": FALLBACK_DOMAIN,
+                "message": (
+                    "We couldn't tailor this interview to your resume. We can "
+                    "run a general ML/GenAI interview instead."
+                ),
+            },
+        )
+
+    domain = warm_up.domain if warm_up is not None else FALLBACK_DOMAIN
+    state = start_session(
+        session_id,
+        domain,
+        warm_up_questions=warm_up.questions if warm_up is not None else None,
+    )
     await get_store().save(state)
 
     audio = await synthesize(state["current_question"]["question"], req.voice)
@@ -440,7 +457,8 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
         question_number=number,
         total_questions=total,
         stage=_stage(state),
-        warm_up_source="resume" if warm_up_questions else "bank",
+        warm_up_source="resume" if warm_up is not None else "bank",
+        domain=domain,
     )
 
 
