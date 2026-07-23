@@ -64,7 +64,7 @@ uv pip install -r requirements-dev.txt
 uv run pytest
 ```
 
-184 passed.
+208 passed.
 
 ## Design decisions
 
