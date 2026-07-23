@@ -66,11 +66,23 @@ button.recording {
   color: #888;
 }
 
-.domain-picker {
+.start-panel {
   display: flex;
   align-items: center;
   gap: 1rem;
   margin-top: 1rem;
+}
+
+.fallback-offer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+button.secondary {
+  background: transparent;
+  border: 1px solid #555;
+  color: #888;
 }
 
 .messages .wrap-up {

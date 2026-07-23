@@ -40,7 +40,7 @@ def client(monkeypatch):
 
 
 def test_create_session_returns_first_question(client):
-    resp = client.post("/api/session", json={"domain": "ml_genai"})
+    resp = client.post("/api/session", json={})
     assert resp.status_code == 200
     data = resp.json()
     assert data["session_id"]
@@ -50,13 +50,8 @@ def test_create_session_returns_first_question(client):
     assert data["total_questions"] == 6  # intro + 3 warm-up + 2 DSA (ADR 0012)
 
 
-def test_create_session_rejects_unknown_domain(client):
-    resp = client.post("/api/session", json={"domain": "nope"})
-    assert resp.status_code == 400
-
-
 def test_answer_advances_with_scripted_provider(client):
-    session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
+    session_id = client.post("/api/session", json={}).json()["session_id"]
 
     resp = client.post(f"/api/session/{session_id}/answer", json={"transcript": "my answer"})
 
@@ -89,7 +84,7 @@ def _drive_to_done(client, session_id):
 
 
 def test_full_session_reaches_done(client):
-    session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
+    session_id = client.post("/api/session", json={}).json()["session_id"]
     _drive_to_done(client, session_id)
 
 
@@ -101,7 +96,7 @@ def test_turn_endpoint_removed(client):
 def test_answer_returns_503_when_provider_unavailable(client, monkeypatch):
     from app import main as main_module
 
-    session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
+    session_id = client.post("/api/session", json={}).json()["session_id"]
 
     async def unavailable(*args, **kwargs):
         raise ProviderUnavailableError("rate limited")
@@ -114,7 +109,7 @@ def test_answer_returns_503_when_provider_unavailable(client, monkeypatch):
 
 
 def _finish_session(client) -> str:
-    session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
+    session_id = client.post("/api/session", json={}).json()["session_id"]
     _drive_to_done(client, session_id)
     return session_id
 
@@ -125,7 +120,7 @@ def test_evaluation_unknown_session_returns_404(client):
 
 
 def test_evaluation_before_interview_finished_returns_409(client):
-    session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
+    session_id = client.post("/api/session", json={}).json()["session_id"]
     resp = client.get(f"/api/session/{session_id}/evaluation")
     assert resp.status_code == 409
 
@@ -214,7 +209,7 @@ async def test_concurrent_evaluation_requests_score_only_once(monkeypatch, anyio
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        sid = (await ac.post("/api/session", json={"domain": "ml_genai"})).json()["session_id"]
+        sid = (await ac.post("/api/session", json={})).json()["session_id"]
         for _ in range(30):
             resp = await ac.post(f"/api/session/{sid}/answer", json={"transcript": "a"})
             data = resp.json()
@@ -300,12 +295,12 @@ def test_upload_unreadable_resume_returns_400(client):
 
 
 def test_create_session_with_unknown_resume_returns_404(client):
-    resp = client.post("/api/session", json={"domain": "ml_genai", "resume_id": "nope"})
+    resp = client.post("/api/session", json={"resume_id": "nope"})
     assert resp.status_code == 404
 
 
 def test_first_question_is_the_intro(client):
-    data = client.post("/api/session", json={"domain": "ml_genai"}).json()
+    data = client.post("/api/session", json={}).json()
 
     assert data["stage"] == "intro"
     assert data["question_number"] == 1
@@ -314,48 +309,119 @@ def test_first_question_is_the_intro(client):
 
 def test_session_with_resume_uses_generated_warm_up(client, monkeypatch):
     from app import main as main_module
+    from app.providers import WarmUp
 
     class GeneratingProvider:
         name = "fake"
 
-        async def generate_warm_up_questions(self, resume_text, domain):
+        async def generate_warm_up_questions(self, resume_text):
             assert "LangGraph" in resume_text  # the stored text reaches the provider
-            return [
-                {"topic": "projects", "difficulty": "easy",
-                 "question": "Tell me about MockMate.", "follow_up_hints": ["Ask about the evaluator"]},
-                {"topic": "skills", "difficulty": "medium",
-                 "question": "How did you test the agent?", "follow_up_hints": ["Ask about fakes"]},
-            ]
+            return WarmUp(
+                domain="web development",
+                questions=[
+                    {"topic": "projects", "difficulty": "easy",
+                     "question": "Tell me about MockMate.", "follow_up_hints": ["Ask about the evaluator"]},
+                    {"topic": "skills", "difficulty": "medium",
+                     "question": "How did you test the agent?", "follow_up_hints": ["Ask about fakes"]},
+                ],
+            )
 
     monkeypatch.setattr(main_module, "get_provider", lambda: GeneratingProvider())
     resume_id = _upload_resume(client).json()["resume_id"]
 
-    data = client.post(
-        "/api/session", json={"domain": "ml_genai", "resume_id": resume_id}
-    ).json()
+    data = client.post("/api/session", json={"resume_id": resume_id}).json()
 
     assert data["total_questions"] == 5  # intro + 2 generated + 2 DSA
     assert data["warm_up_source"] == "resume"
+    assert data["domain"] == "web development"  # the resume named the field (ADR 0023)
 
 
-def test_session_falls_back_to_bank_when_generation_fails(client, monkeypatch):
+def test_generation_failure_offers_the_bank_instead_of_assuming_it(client, monkeypatch):
     from app import main as main_module
 
     class FailingProvider:
         name = "fake"
 
-        async def generate_warm_up_questions(self, resume_text, domain):
+        async def generate_warm_up_questions(self, resume_text):
             raise ProviderUnavailableError("429")
 
     monkeypatch.setattr(main_module, "get_provider", lambda: FailingProvider())
     resume_id = _upload_resume(client).json()["resume_id"]
 
-    resp = client.post("/api/session", json={"domain": "ml_genai", "resume_id": resume_id})
+    resp = client.post("/api/session", json={"resume_id": resume_id})
 
-    assert resp.status_code == 200  # a failed generation never blocks a Session
+    # ADR 0023: a Candidate who uploaded a resume is asked before being given a
+    # general interview - never silently handed one.
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["reason"] == "generation_unavailable"
+    assert detail["fallback_domain"] == "ml_genai"
+
+
+def test_keyless_demo_asks_before_assuming_the_bank(client):
+    # No monkeypatching: the `client` fixture already strips GROQ_API_KEY and
+    # GEMINI_API_KEY, so get_provider() resolves to ScriptedProvider - the
+    # keyless zero-setup demo (ADR 0002). It returns empty `questions` on
+    # every call, which is the path every visitor without API keys hits.
+    # ADR 0023 says that must be disclosed, not silently substituted.
+    resume_id = _upload_resume(client).json()["resume_id"]
+
+    resp = client.post("/api/session", json={"resume_id": resume_id})
+
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["reason"] == "generation_unavailable"
+
+
+def test_candidate_can_accept_the_bank_fallback(client, monkeypatch):
+    from app import main as main_module
+
+    # Accepting the offer must NOT retry generation (ADR 0023): the Candidate
+    # asked for the general interview, so a transient recovery that quietly
+    # produced a tailored one would contradict the button they clicked. This
+    # provider fails loudly if called at all, proving the short-circuit.
+    calls = {"n": 0}
+
+    class MustNotBeCalledProvider:
+        name = "fake"
+
+        async def generate_warm_up_questions(self, resume_text):
+            calls["n"] += 1
+            raise AssertionError("generation must be skipped when the bank was accepted")
+
+    monkeypatch.setattr(main_module, "get_provider", lambda: MustNotBeCalledProvider())
+    resume_id = _upload_resume(client).json()["resume_id"]
+
+    resp = client.post(
+        "/api/session", json={"resume_id": resume_id, "allow_bank_fallback": True}
+    )
+
+    assert resp.status_code == 200
     data = resp.json()
+    assert calls["n"] == 0  # generation was never attempted
     assert data["total_questions"] == 6  # intro + 3 curated + 2 DSA
-    assert data["warm_up_source"] == "bank"  # degradation is labeled, never silent
+    assert data["warm_up_source"] == "bank"
+    assert data["domain"] == "ml_genai"
+
+
+def test_session_without_a_resume_starts_on_the_bank_without_asking(client):
+    # No resume means nothing was promised, so there is nothing to disclose:
+    # the frontend already tells the Candidate what they are getting.
+    resp = client.post("/api/session", json={})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["warm_up_source"] == "bank"
+    assert data["domain"] == "ml_genai"
+
+
+def test_create_session_ignores_a_domain_field(client):
+    # ADR 0023 removed `domain` from the request. Pydantic ignores unknown keys
+    # by default, so an old client keeps working rather than breaking.
+    resp = client.post("/api/session", json={"domain": "anything at all"})
+
+    assert resp.status_code == 200
+    assert resp.json()["domain"] == "ml_genai"
 
 
 # --- The DSA round's endpoints (ADR 0017) ---
@@ -381,7 +447,7 @@ def _reach_dsa(client, monkeypatch):
     """Start a Session whose single DSA question is the fixed echo question,
     then answer through intro + warm-up until it is current."""
     monkeypatch.setattr("app.agent.plan_dsa", lambda **kwargs: [ECHO_DSA_QUESTION])
-    session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
+    session_id = client.post("/api/session", json={}).json()["session_id"]
     for _ in range(4):  # intro + 3 curated warm-ups, scripted provider advances each
         data = client.post(
             f"/api/session/{session_id}/answer", json={"transcript": "answer"}
@@ -405,7 +471,7 @@ def test_run_executes_code_against_the_test_cases(client, monkeypatch):
 
 
 def test_run_outside_the_dsa_stage_returns_409(client):
-    session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
+    session_id = client.post("/api/session", json={}).json()["session_id"]
 
     resp = client.post(f"/api/session/{session_id}/dsa/run", json={"code": "x = 1"})
 
@@ -613,7 +679,7 @@ def test_snapshot_is_accepted_on_a_coding_question(client, monkeypatch):
 
 
 def test_snapshot_outside_the_dsa_stage_returns_409(client):
-    session_id = client.post("/api/session", json={"domain": "ml_genai"}).json()["session_id"]
+    session_id = client.post("/api/session", json={}).json()["session_id"]
 
     resp = _snapshot(client, session_id, "x = 1")
 

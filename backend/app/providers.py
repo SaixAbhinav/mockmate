@@ -90,18 +90,20 @@ EVALUATE_SUBMISSION_SYSTEM_PROMPT = (
 
 WARM_UP_QUESTIONS_SYSTEM_PROMPT = (
     "You are preparing the warm-up round of a mock technical interview. You "
-    "are given the interview domain and the candidate's resume text. Write "
-    "exactly 3 short spoken interview questions about the candidate's own "
-    "background - their projects, skills, and experience - preferring items "
-    "related to the domain. Every question must be answerable from what the "
-    "resume actually says: never invent projects, employers, or skills that "
-    "are not on it. For each question also write: 'topic' (one or two words), "
-    "'difficulty' (one of easy, medium, hard), and 'follow_up_hints' - 2 "
-    "instructions to the interviewer for probing deeper, phrased like 'Ask "
-    "about X'. Keep each question under 30 words - it is spoken aloud. "
-    'Respond with strict JSON only: {"questions": [{"topic": string, '
-    '"difficulty": "easy"|"medium"|"hard", "question": string, '
-    '"follow_up_hints": [string]}]}.'
+    "are given the candidate's resume text. Write exactly 3 short spoken "
+    "interview questions about the candidate's own background - their "
+    "projects, skills, and experience - in whatever field the resume actually "
+    "shows. Every question must be answerable from what the resume actually "
+    "says: never invent projects, employers, or skills that are not on it. "
+    "Also report 'domain': two or three words naming that field the way a "
+    "person would say it, for example 'web development', 'machine learning', "
+    "or 'embedded systems'. For each question also write: 'topic' (one or two "
+    "words), 'difficulty' (one of easy, medium, hard), and 'follow_up_hints' "
+    "- 2 instructions to the interviewer for probing deeper, phrased like "
+    "'Ask about X'. Keep each question under 30 words - it is spoken aloud. "
+    'Respond with strict JSON only: {"domain": string, "questions": '
+    '[{"topic": string, "difficulty": "easy"|"medium"|"hard", '
+    '"question": string, "follow_up_hints": [string]}]}.'
 )
 
 REACT_TO_CODE_SYSTEM_PROMPT = (
@@ -197,6 +199,23 @@ class SubmissionScore:
     comment: str
 
 
+MAX_DOMAIN_LABEL_CHARS = 60
+
+
+@dataclass(frozen=True)
+class WarmUp:
+    """Resume-grounded warm-up questions plus the field the resume shows
+    (ADR 0023).
+
+    `domain` is a display label: it selects nothing, it describes the Session.
+    Empty `questions` means the provider cannot generate them and the caller
+    should fall back to the curated bank (ADR 0015).
+    """
+
+    domain: str
+    questions: list[dict]
+
+
 @dataclass(frozen=True)
 class Assessment:
     """The prose half of an Evaluation: overall read, strengths, improvements."""
@@ -250,11 +269,10 @@ class LLMProvider(Protocol):
         Raises ProviderError on failure — the caller marks the entry unscored."""
         ...
 
-    async def generate_warm_up_questions(
-        self, resume_text: str, domain: str
-    ) -> list[dict]:
-        """Resume-grounded warm-up questions (ADR 0015), in the ADR 0003 shape
-        (minus domain). Empty list means the provider cannot generate them.
+    async def generate_warm_up_questions(self, resume_text: str) -> WarmUp:
+        """Resume-grounded warm-up questions plus the inferred field (ADR 0015,
+        ADR 0023), questions in the ADR 0003 shape (minus domain). Empty
+        `questions` means the provider cannot generate them.
         Raises ProviderError on failure."""
         ...
 
@@ -359,8 +377,8 @@ def _assess_coding_line(s: dict) -> str:
     )
 
 
-def _warm_up_user_turn(resume_text: str, domain: str) -> str:
-    return f"Interview domain: {domain}\nResume:\n{resume_text}"
+def _warm_up_user_turn(resume_text: str) -> str:
+    return f"Resume:\n{resume_text}"
 
 
 def _react_user_turn(question: str, code: str, results_summary: str) -> str:
@@ -410,9 +428,10 @@ def _parse_watch_decision(content: str) -> WatchDecision:
     return WatchDecision(action=action, remark=remark)
 
 
-def _parse_warm_up_questions(content: str) -> list[dict]:
+def _parse_warm_up_questions(content: str) -> WarmUp:
     try:
         data = json.loads(content)
+        domain = data["domain"]
         questions = [
             {
                 "topic": entry["topic"],
@@ -426,6 +445,11 @@ def _parse_warm_up_questions(content: str) -> list[dict]:
         raise ProviderMalformedError(
             f"malformed warm-up questions response: {content!r}"
         ) from exc
+    if not isinstance(domain, str) or not domain.strip():
+        raise ProviderMalformedError(f"bad warm-up domain: {domain!r}")
+    # The label is displayed, never matched against anything (ADR 0023), so a
+    # rambling answer is cosmetic - truncate rather than fail the whole Session.
+    domain = domain.strip()[:MAX_DOMAIN_LABEL_CHARS]
     if not 2 <= len(questions) <= 4:
         raise ProviderMalformedError(
             f"expected 2-4 warm-up questions, got {len(questions)}"
@@ -435,7 +459,7 @@ def _parse_warm_up_questions(content: str) -> list[dict]:
             raise ProviderMalformedError(f"bad warm-up difficulty: {q['difficulty']!r}")
         if not q["follow_up_hints"]:
             raise ProviderMalformedError("warm-up follow_up_hints must be non-empty")
-    return questions
+    return WarmUp(domain=domain, questions=questions)
 
 
 def _parse_score(content: str) -> AnswerScore:
@@ -540,12 +564,10 @@ class GroqProvider:
         ]
         return _parse_submission_score(await self._chat_json(messages, max_tokens=300))
 
-    async def generate_warm_up_questions(
-        self, resume_text: str, domain: str
-    ) -> list[dict]:
+    async def generate_warm_up_questions(self, resume_text: str) -> WarmUp:
         messages = [
             {"role": "system", "content": WARM_UP_QUESTIONS_SYSTEM_PROMPT},
-            {"role": "user", "content": _warm_up_user_turn(resume_text, domain)},
+            {"role": "user", "content": _warm_up_user_turn(resume_text)},
         ]
         return _parse_warm_up_questions(await self._chat_json(messages, max_tokens=800))
 
@@ -683,11 +705,9 @@ class GeminiProvider:
         )
         return _parse_submission_score(content)
 
-    async def generate_warm_up_questions(
-        self, resume_text: str, domain: str
-    ) -> list[dict]:
+    async def generate_warm_up_questions(self, resume_text: str) -> WarmUp:
         contents = [
-            {"role": "user", "parts": [{"text": _warm_up_user_turn(resume_text, domain)}]}
+            {"role": "user", "parts": [{"text": _warm_up_user_turn(resume_text)}]}
         ]
         content = await self._generate(
             WARM_UP_QUESTIONS_SYSTEM_PROMPT, contents, response_mime_type="application/json"
@@ -836,11 +856,9 @@ class ScriptedProvider:
             comment="Scripted demo score — add an API key for a real code review.",
         )
 
-    async def generate_warm_up_questions(
-        self, resume_text: str, domain: str
-    ) -> list[dict]:
+    async def generate_warm_up_questions(self, resume_text: str) -> WarmUp:
         # No model, no generation - the endpoint falls back to the curated bank.
-        return []
+        return WarmUp(domain="", questions=[])
 
     async def react_to_code(
         self, question: str, code: str, results_summary: str,
@@ -959,12 +977,8 @@ class FailoverProvider:
             runs=runs,
         )
 
-    async def generate_warm_up_questions(
-        self, resume_text: str, domain: str
-    ) -> list[dict]:
-        return await self._call(
-            "generate_warm_up_questions", resume_text=resume_text, domain=domain
-        )
+    async def generate_warm_up_questions(self, resume_text: str) -> WarmUp:
+        return await self._call("generate_warm_up_questions", resume_text=resume_text)
 
     async def react_to_code(
         self, question: str, code: str, results_summary: str,

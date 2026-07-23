@@ -64,6 +64,12 @@ def load_bank(domain: str, questions_dir: Path = DEFAULT_QUESTIONS_DIR) -> list[
     return questions
 
 
+# The one bank guaranteed to exist. Since ADR 0023 the Session's `domain` is a
+# free-form label inferred from the resume, so it must never be used to pick a
+# YAML file - a label with no bank behind it would fail the Session at creation.
+FALLBACK_DOMAIN = "ml_genai"
+
+
 def plan_warm_up(
     domain: str,
     *,
@@ -72,6 +78,8 @@ def plan_warm_up(
 ) -> list[Question]:
     """Curated fallback for the warm-up round (ADR 0012/0015): a seeded draw
     of 3 questions from the domain's bank, sorted easy->hard.
+
+    Callers pass FALLBACK_DOMAIN, never a Session's `domain` label (ADR 0023).
 
     Used when no resume was uploaded or resume-grounded generation was
     unavailable. The old 6-8 question domain round this bank used to power
