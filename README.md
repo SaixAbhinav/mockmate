@@ -64,7 +64,7 @@ uv pip install -r requirements-dev.txt
 uv run pytest
 ```
 
-246 passed.
+259 passed.
 
 ## Generating questions (dev chore)
 
@@ -77,11 +77,15 @@ for you to review by hand into `backend/app/questions/dsa.yaml`.
 
 ```bash
 cd backend
+# coding questions (schema + length + dedupe + runner-correctness gate)
 GROQ_API_KEY=... uv run python -m scripts.generate_dsa --topic arrays --count 5
+# conceptual warm-up questions (no runner gate — nothing machine-testable)
+GROQ_API_KEY=... uv run python -m scripts.generate_warm_up --topic rag --count 5
 ```
 
-It writes to `dsa.staging.yaml` (never the bank directly) and prints what it
-kept and why it dropped the rest. Reviewing is deletion, not authorship.
+Each writes to a gitignored `*.staging.yaml` (never the bank directly) and
+prints what it kept and why it dropped the rest. Reviewing is deletion, not
+authorship.
 
 ## Design decisions
 

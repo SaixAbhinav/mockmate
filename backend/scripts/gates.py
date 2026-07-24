@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import re
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
-from app.questions import QuestionBankError, load_dsa_bank
+from app.questions import QuestionBankError, load_bank, load_dsa_bank
 from app.runner import run_tests
 
 DEFAULT_MAX_WORDS = 50
@@ -38,6 +38,21 @@ def check_schema(candidate: dict) -> GateResult:
         (Path(tmp) / "dsa.yaml").write_text(yaml.safe_dump([entry]), encoding="utf-8")
         try:
             load_dsa_bank(questions_dir=Path(tmp))
+        except QuestionBankError as exc:
+            return GateResult(False, str(exc))
+    return GateResult(True)
+
+
+def check_warm_up_schema(candidate: dict) -> GateResult:
+    """The candidate must load as a valid warm-up Question. Reuses load_bank, so
+    the conceptual-question schema is defined once. A fixed temp filename keeps
+    the candidate's own domain value as data to validate, not a path input."""
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "bank.yaml").write_text(
+            yaml.safe_dump([candidate]), encoding="utf-8"
+        )
+        try:
+            load_bank("bank", questions_dir=Path(tmp))
         except QuestionBankError as exc:
             return GateResult(False, str(exc))
     return GateResult(True)
@@ -119,6 +134,25 @@ def gate_candidate(
     return check_correctness(candidate)
 
 
+def gate_warm_up_candidate(
+    candidate: dict,
+    *,
+    existing_texts: Iterable[str],
+    max_words: int = DEFAULT_MAX_WORDS,
+) -> GateResult:
+    """Gate a conceptual warm-up candidate: schema, length, duplication. There is
+    deliberately no runner correctness check — a warm-up question has nothing
+    machine-testable (ADR 0024), so the quality floor here is lower than the DSA
+    gate's, and human review carries more of the weight."""
+    schema = check_warm_up_schema(candidate)
+    if not schema.passed:
+        return schema
+    length = check_length(candidate, max_words=max_words)
+    if not length.passed:
+        return length
+    return check_duplicate(candidate, existing_texts)
+
+
 @dataclass(frozen=True)
 class GatedBatch:
     """The outcome of gating a batch: keepers, and rejects with their reason."""
@@ -131,16 +165,19 @@ def gate_batch(
     candidates: Iterable[dict],
     existing_texts: Iterable[str] = (),
     *,
+    gate: Callable[..., GateResult] = gate_candidate,
     max_words: int = DEFAULT_MAX_WORDS,
 ) -> GatedBatch:
     """Gate a whole batch. Accepted question texts accumulate into the seen set,
     so a later candidate that duplicates an earlier keeper in the same batch is
-    itself rejected (ADR 0024: dedupe against the bank and within the batch)."""
+    itself rejected (ADR 0024: dedupe against the bank and within the batch).
+    ``gate`` selects the per-candidate check — the DSA gate by default, or
+    gate_warm_up_candidate for conceptual questions."""
     seen = [str(t) for t in existing_texts]
     kept: list[dict] = []
     rejected: list[tuple[dict, str]] = []
     for candidate in candidates:
-        result = gate_candidate(candidate, existing_texts=seen, max_words=max_words)
+        result = gate(candidate, existing_texts=seen, max_words=max_words)
         if result.passed:
             kept.append(candidate)
             seen.append(str(candidate.get("question", "")))
