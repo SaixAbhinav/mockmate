@@ -40,12 +40,12 @@ index that drifts from the ADRs is worse than no index.
 | [0019](0019-voice-live-while-coding.md) | Watching interviewer part 2 — voice stays live while coding | accepted |
 | [0020](0020-dsa-round-scoring.md) | DSA-round scoring — measured facts, judged quality | accepted |
 | [0021](0021-session-store-interface.md) | Session store — the interface 0007 promised | accepted |
+| [0023](0023-resume-driven-domain.md) | The résumé decides the domain | accepted |
 
 ## Open — decided direction, not yet closed out
 
 | # | Title | Status | Where it stands |
 |---|---|---|---|
-| [0023](0023-resume-driven-domain.md) | The résumé decides the domain | accepted | ADR in PR #22; implementation in PR #24 (9 commits, 209 tests green). Not yet merged. |
 | [0024](0024-offline-question-generation.md) | Generate banks offline, gate by machine, review by hand | proposed | ADR in PR #23. No code. Awaiting decision. |
 | [0022](0022-weak-area-targeting.md) | Weak-area targeting | deferred | Deferred for v1: no users yet, value unproven, and it forces either the full accounts day (0009) or an identity model that contradicts it. Analysis kept; revisit when real usage demands it. |
 
