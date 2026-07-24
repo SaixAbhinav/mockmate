@@ -46,7 +46,7 @@ index that drifts from the ADRs is worse than no index.
 
 | # | Title | Status | Where it stands |
 |---|---|---|---|
-| [0024](0024-offline-question-generation.md) | Generate banks offline, gate by machine, review by hand | proposed | ADR in PR #23. No code. Awaiting decision. |
+| [0024](0024-offline-question-generation.md) | Generate banks offline, gate by machine, review by hand | accepted | Accepted; DSA-first. The machine-gate library (schema / length / dedupe / runner-correctness) is built and tested. Generation driver + CLI to follow. |
 | [0022](0022-weak-area-targeting.md) | Weak-area targeting | deferred | Deferred for v1: no users yet, value unproven, and it forces either the full accounts day (0009) or an identity model that contradicts it. Analysis kept; revisit when real usage demands it. |
 
 ## Not yet ADRs — parked threads

@@ -1,6 +1,6 @@
 # ADR 0024: Question banks are generated offline, gated by machine, reviewed by hand
 
-Date: 2026-07-23 · Status: proposed
+Date: 2026-07-23 · Accepted: 2026-07-24 · Status: accepted
 
 ## Context
 
