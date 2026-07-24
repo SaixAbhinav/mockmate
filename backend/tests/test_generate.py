@@ -10,12 +10,14 @@ import json
 
 import pytest
 
-from app.questions import DsaQuestion
-from scripts.gates import gate_batch
+from app.questions import DsaQuestion, Question
+from scripts.gates import gate_batch, gate_warm_up_candidate
 from scripts.generate import (
     GenerationError,
     build_generation_messages,
+    build_warm_up_messages,
     generate_candidates,
+    generate_warm_up_candidates,
     parse_candidates,
 )
 
@@ -140,6 +142,73 @@ async def test_generate_candidates_propagates_a_malformed_reply():
         await generate_candidates(
             fake_chat, topic="arrays", difficulty="easy", count=1, examples=[]
         )
+
+
+def _warm_example(**overrides):
+    fields = dict(
+        domain="ml_genai",
+        topic="bias-variance",
+        difficulty="easy",
+        question="What is overfitting, and how would you detect it?",
+        follow_up_hints=["Ask about train vs validation loss"],
+    )
+    fields.update(overrides)
+    return Question(**fields)
+
+
+def _warm_reply(**overrides):
+    candidate = {
+        "question": "What is regularization, and why does it help with overfitting?",
+        "follow_up_hints": ["Ask about L1 versus L2"],
+    }
+    candidate.update(overrides)
+    return json.dumps({"questions": [candidate]})
+
+
+def test_build_warm_up_messages_states_domain_topic_difficulty_and_count():
+    messages = build_warm_up_messages(
+        "ml_genai", "embeddings", "medium", 4, examples=[]
+    )
+    text = " ".join(m["content"] for m in messages)
+    assert "ml_genai" in text
+    assert "embeddings" in text
+    assert "medium" in text
+    assert "4" in text
+
+
+def test_build_warm_up_messages_does_not_ask_for_code():
+    # Conceptual questions have no code fields; the prompt must not request them.
+    messages = build_warm_up_messages("ml_genai", "rag", "easy", 3, examples=[])
+    text = " ".join(m["content"] for m in messages).lower()
+    assert "reference_solution" not in text
+    assert "test_cases" not in text
+
+
+async def test_generate_warm_up_candidates_returns_parsed_and_stamped():
+    async def fake_chat(messages):
+        return _warm_reply()
+
+    candidates = await generate_warm_up_candidates(
+        fake_chat, domain="ml_genai", topic="rag", difficulty="hard", count=1, examples=[]
+    )
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["domain"] == "ml_genai"
+    assert candidate["topic"] == "rag"
+    assert candidate["difficulty"] == "hard"
+
+
+async def test_generated_warm_up_candidate_survives_the_warm_up_gate():
+    async def fake_chat(messages):
+        return _warm_reply()
+
+    candidates = await generate_warm_up_candidates(
+        fake_chat, domain="ml_genai", topic="bias-variance", difficulty="easy",
+        count=1, examples=[],
+    )
+    batch = gate_batch(candidates, existing_texts=[], gate=gate_warm_up_candidate)
+    assert len(batch.kept) == 1
+    assert not batch.rejected
 
 
 async def test_generated_candidate_with_a_correct_solution_survives_the_gates():

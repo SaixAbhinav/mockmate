@@ -17,44 +17,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
-from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
-from app.providers import GroqProvider
 from app.questions import DEFAULT_QUESTIONS_DIR, DIFFICULTIES, load_dsa_bank
 from scripts.gates import DEFAULT_MAX_WORDS, gate_batch
-from scripts.generate import Chat, generate_candidates
+from scripts.generate import Report, append_staging, generate_candidates, groq_chat
 
 DEFAULT_STAGING = Path(__file__).parent / "dsa.staging.yaml"
-
-
-@dataclass(frozen=True)
-class Report:
-    """What one generation run produced: how many were staged, and why the rest
-    were dropped (each as a question snippet and the gate's reason)."""
-
-    kept: int
-    rejected: list[tuple[str, str]]
-    staging_path: Path
-
-
-def _append_staging(out_path: Path, kept: list[dict]) -> None:
-    """Append kept candidates to the staging YAML, dropping the reference
-    solution (proof of coherence only, never banked — ADR 0024)."""
-    existing = []
-    if out_path.exists():
-        existing = yaml.safe_load(out_path.read_text(encoding="utf-8")) or []
-    entries = existing + [
-        {k: v for k, v in candidate.items() if k != "reference_solution"}
-        for candidate in kept
-    ]
-    out_path.write_text(
-        yaml.safe_dump(entries, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
 
 
 async def run(
@@ -80,7 +49,7 @@ async def run(
     batch = gate_batch(candidates, existing_texts, max_words=max_words)
 
     if batch.kept:
-        _append_staging(out_path, batch.kept)
+        append_staging(out_path, batch.kept)
 
     rejected = [
         (str(candidate.get("question", ""))[:80], reason)
@@ -106,26 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _provider_chat() -> Chat:
-    """Wire the ``chat`` seam to a real provider. Reaches the transport in
-    providers.py directly (this is a dev script, not the running service — it
-    does not need the graph's task-specific methods, just raw JSON completion)."""
-    key = os.environ.get("GROQ_API_KEY")
-    if not key:
-        raise SystemExit("GROQ_API_KEY is not set: generation is an offline dev chore")
-    provider = GroqProvider(key)
-
-    async def chat(messages: list[dict[str, str]]) -> str:
-        return await provider._chat_json(messages, max_tokens=2000)
-
-    return chat
-
-
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     report = asyncio.run(
         run(
-            _provider_chat(),
+            groq_chat(),
             topic=args.topic,
             difficulty=args.difficulty,
             count=args.count,

@@ -10,8 +10,10 @@ from scripts.gates import (
     check_duplicate,
     check_length,
     check_schema,
+    check_warm_up_schema,
     gate_batch,
     gate_candidate,
+    gate_warm_up_candidate,
 )
 
 
@@ -161,3 +163,55 @@ def test_gate_batch_rejects_a_within_batch_duplicate():
     assert len(batch.kept) == 1
     assert len(batch.rejected) == 1
     assert "duplicate" in batch.rejected[0][1]
+
+
+def _warm_up_candidate(**overrides):
+    """A minimal, valid conceptual (warm-up) candidate; no code fields."""
+    candidate = {
+        "domain": "ml_genai",
+        "topic": "bias-variance",
+        "difficulty": "easy",
+        "question": "What is regularization, and why does it help with overfitting?",
+        "follow_up_hints": ["Ask about L1 versus L2"],
+    }
+    candidate.update(overrides)
+    return candidate
+
+
+def test_check_warm_up_schema_accepts_a_valid_candidate():
+    assert check_warm_up_schema(_warm_up_candidate()).passed
+
+
+def test_check_warm_up_schema_rejects_a_missing_field():
+    candidate = _warm_up_candidate()
+    del candidate["follow_up_hints"]
+    result = check_warm_up_schema(candidate)
+    assert not result.passed
+    assert "follow_up_hints" in result.reason
+
+
+def test_gate_warm_up_candidate_accepts_a_valid_candidate():
+    assert gate_warm_up_candidate(_warm_up_candidate(), existing_texts=[]).passed
+
+
+def test_gate_warm_up_needs_no_code_fields_or_reference_solution():
+    # A conceptual question has no function_name/test_cases and no runner check;
+    # it must still pass. This is the whole difference from the DSA gate.
+    candidate = _warm_up_candidate()
+    assert "function_name" not in candidate
+    assert "reference_solution" not in candidate
+    assert gate_warm_up_candidate(candidate, existing_texts=[]).passed
+
+
+def test_gate_warm_up_rejects_a_duplicate():
+    candidate = _warm_up_candidate()
+    result = gate_warm_up_candidate(candidate, existing_texts=[candidate["question"]])
+    assert not result.passed
+
+
+def test_gate_batch_can_use_the_warm_up_gate():
+    good = _warm_up_candidate()
+    bad = _warm_up_candidate(difficulty="trivial")  # invalid difficulty fails schema
+    batch = gate_batch([good, bad], existing_texts=[], gate=gate_warm_up_candidate)
+    assert good in batch.kept
+    assert len(batch.rejected) == 1
