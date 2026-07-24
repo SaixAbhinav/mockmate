@@ -64,7 +64,24 @@ uv pip install -r requirements-dev.txt
 uv run pytest
 ```
 
-209 passed.
+246 passed.
+
+## Generating questions (dev chore)
+
+The question banks are grown offline, not at runtime ([ADR 0024](docs/decisions/0024-offline-question-generation.md)).
+A generator asks a provider for coding questions on a topic, runs them through
+machine gates — schema, spoken length, de-duplication, and a correctness check
+that executes a throwaway reference solution against the emitted test cases in
+the sandboxed runner — and appends the survivors to a gitignored staging file
+for you to review by hand into `backend/app/questions/dsa.yaml`.
+
+```bash
+cd backend
+GROQ_API_KEY=... uv run python -m scripts.generate_dsa --topic arrays --count 5
+```
+
+It writes to `dsa.staging.yaml` (never the bank directly) and prints what it
+kept and why it dropped the rest. Reviewing is deletion, not authorship.
 
 ## Design decisions
 

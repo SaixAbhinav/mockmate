@@ -23,6 +23,10 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
+# Offline question-generation staging output (ADR 0024) — reviewed by hand into
+# the real bank, never committed as-is.
+*.staging.yaml
+
 # --- Node / frontend ---
 node_modules/
 dist/
