@@ -4,7 +4,7 @@ A voice-based AI mock interviewer you can run for free — the "$150/month
 interview-prep SaaS" genre, rebuilt as an open, self-hostable app.
 
 Speak your answers; an AI interviewer asks questions, probes follow-ups, and
-(soon) scores you against rubrics and targets your weak areas.
+scores you against rubrics.
 
 **Status: phased interview.** A Session now runs like a real interview's
 opening: a "tell me about yourself" intro, then a warm-up round grounded in
