@@ -1,5 +1,7 @@
 # MockMate (working title)
 
+[![CI](https://github.com/SaixAbhinav/mockmate/actions/workflows/ci.yml/badge.svg)](https://github.com/SaixAbhinav/mockmate/actions/workflows/ci.yml)
+
 A voice-based AI mock interviewer you can run for free — the "$150/month
 interview-prep SaaS" genre, rebuilt as an open, self-hostable app.
 
