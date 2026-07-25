@@ -1,6 +1,6 @@
 # ADR 0025: Deploy on Render as a static SPA plus a single API container
 
-Date: 2026-07-24 · Amended: 2026-07-25 · Status: proposed
+Date: 2026-07-24 · Amended: 2026-07-25 · Accepted: 2026-07-25 · Status: accepted
 
 ## Context
 
@@ -139,7 +139,34 @@ single API container.**
 
 ## Status
 
-Proposed. Two points are worth a second opinion before this is accepted: the
-accepted runner residual risk (defensible at demo exposure, but a genuine
-decision), and the two-service split, which buys an always-instant page at the
-cost of version coupling that a single image gave for free.
+Accepted and implemented. The repo is deploy-ready: a Python-only backend image,
+an env-configurable Runner timeout, a landing screen that wakes the API on mount,
+and a `render.yaml` blueprint.
+
+**The memory consequence above is now closed with evidence rather than left
+unverified.** The image was built and run locally under Render's actual cap
+(`--memory=512m`), with real provider keys, and driven through a Session, a live
+Groq round-trip with edge-tts audio, and a Runner subprocess:
+
+| Check | Result |
+|---|---|
+| Peak memory under the cap | **69.39 MiB / 512 MiB (13.55%)** |
+| OOM kill | `OOMKilled=false`, 0 restarts |
+| Graceful SIGTERM shutdown | 1.03s |
+| Image size | 309 MB |
+
+LangGraph proved far lighter than this ADR feared — roughly 86% headroom
+remains. What was *not* exercised: the Evaluation's full concurrent fan-out
+(which needs a completed interview) and `pypdf` parsing a résumé. Both are small
+relative to 442 MiB of spare room.
+
+Two risks remain live and were accepted, not solved: the Runner's soft sandbox at
+demo exposure, and version drift between the separately-deployed SPA and API.
+Revisit the first before any genuinely public launch.
+
+One question this ADR could not settle from documentation: **whether a Render
+static-site rewrite proxies `POST` bodies.** The docs are silent and the
+community forum was unreachable. Every meaningful call here is a POST, so the
+first live résumé upload is the real test — and the `VITE_API_BASE` /
+`CORS_ORIGINS` fallback exists so the answer costs two environment variables
+rather than a redesign.

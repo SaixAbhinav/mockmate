@@ -42,12 +42,12 @@ index that drifts from the ADRs is worse than no index.
 | [0021](0021-session-store-interface.md) | Session store — the interface 0007 promised | accepted |
 | [0023](0023-resume-driven-domain.md) | The résumé decides the domain | accepted |
 | [0024](0024-offline-question-generation.md) | Generate banks offline, gate by machine, review by hand | accepted |
+| [0025](0025-deploy-render-static-plus-api.md) | Deploy on Render as a static SPA plus a single API container | accepted |
 
 ## Open — decided direction, not yet closed out
 
 | # | Title | Status | Where it stands |
 |---|---|---|---|
-| [0025](0025-deploy-render-static-plus-api.md) | Deploy on Render as a static SPA plus a single API container | proposed | ADR written (amended from Fly.io — it requires a credit card). No code yet: Dockerfile, landing screen + health warm-up, env-configurable runner timeout, and `render.yaml` follow in one PR. |
 | [0022](0022-weak-area-targeting.md) | Weak-area targeting | deferred | Deferred for v1: no users yet, value unproven, and it forces either the full accounts day (0009) or an identity model that contradicts it. Analysis kept; revisit when real usage demands it. |
 
 ## Not yet ADRs — parked threads
