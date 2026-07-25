@@ -1,0 +1,4 @@
+# The Runner executes untrusted Candidate code under a soft sandbox (ADR 0025).
+# Demo exposure is "people I send the link to", not search traffic.
+User-agent: *
+Disallow: /

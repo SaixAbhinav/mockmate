@@ -1,0 +1,50 @@
+# Render blueprint (ADR 0025). Two services behind one apparent origin: an
+# always-on static site serving the SPA, rewriting /api/* to a sleeping API
+# container. A rewrite resolves server-side, so the browser sees one origin and
+# production needs no CORS - the same assumption vite.config.js makes in dev.
+services:
+  - name: mockmate-api
+    type: web
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      # Free instances are CPU-throttled; a fixed 5s can fail a correct
+      # solution on interpreter start-up alone (ADR 0025).
+      - key: RUNNER_TIMEOUT_SECONDS
+        value: "15"
+      # Set in the Render dashboard, never in git. Without it the app still
+      # runs, using the scripted demo interviewer (ADR 0002).
+      - key: GROQ_API_KEY
+        sync: false
+
+  - name: mockmate
+    type: web
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/dist
+    envVars:
+      # Match CI (.github/workflows/ci.yml pins node-version 20) so the build
+      # that ships is the build that was linted. Without this Render picks its
+      # own default, which can drift from what was verified.
+      - key: NODE_VERSION
+        value: "20"
+      # Fallback only - leave commented unless the /api/* rewrite below turns
+      # out not to proxy POST bodies. Uncomment (with the API's real URL) and
+      # the SPA calls the API directly cross-origin instead, which CORS_ORIGINS
+      # on the API service allows.
+      # - key: VITE_API_BASE
+      #   value: https://mockmate-api.onrender.com
+    routes:
+      # Proxy the API so the browser only ever sees this origin. Replace the
+      # host below with the API service's real URL after its first deploy.
+      # Render skips rules when a real file exists at the path, so this cannot
+      # shadow built assets.
+      - type: rewrite
+        source: /api/*
+        destination: https://mockmate-api.onrender.com/api/*
+      # SPA fallback: every other path serves the app shell.
+      - type: rewrite
+        source: /*
+        destination: /index.html
