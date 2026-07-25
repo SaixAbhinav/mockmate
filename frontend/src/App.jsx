@@ -41,6 +41,7 @@ function App() {
   const [runReport, setRunReport] = useState(null)
   const [dsaSubmitted, setDsaSubmitted] = useState(false)
   const [running, setRunning] = useState(false)
+  const [apiReady, setApiReady] = useState(false)
   const recorderRef = useRef(null)
   const chatEndRef = useRef(null)
   const resumeUploadTokenRef = useRef(0)
@@ -55,6 +56,27 @@ function App() {
         setVoice(data.default)
       })
       .catch(() => setError('backend not reachable — is it running on port 8000?'))
+  }, [])
+
+  // A free-tier API container sleeps when idle and takes ~30-60s to wake
+  // (ADR 0025). Ping it as soon as the start screen renders so it boots while
+  // the Candidate reads and picks a resume, not after they click Start.
+  //
+  // Deliberately no timeout: aborting would kill a request that was going to
+  // succeed. The wait is fine; leaving the Candidate to guess is not, so the
+  // result is tracked and shown.
+  //
+  // Only a 2xx counts as awake. fetch() resolves for 5xx as well, so a plain
+  // .then() would clear the notice on the 502/503 a platform serves *while*
+  // the container is still starting - exactly when the notice is wanted. A
+  // failure leaves the notice up, which reads as "still waking" and is the
+  // honest thing to show when the API is not answering.
+  useEffect(() => {
+    fetch(api('/api/health'))
+      .then((r) => {
+        if (r.ok) setApiReady(true)
+      })
+      .catch(() => {})
   }, [])
 
   // Keep the newest message in view, chat-app style (wireframe v1).
@@ -170,8 +192,15 @@ function App() {
       setPhase(null)
       setScreen('interview')
       await playAudio(data.audio_b64)
-    } catch (err) {
-      setError(String(err))
+    } catch {
+      // A raw fetch error is not something to show a Candidate. On a first
+      // visit the likeliest cause is simply that the API is still waking
+      // (ADR 0025), so say that rather than printing the exception.
+      setError(
+        apiReady
+          ? 'Could not start the interview. Please try again.'
+          : 'The interviewer is still waking up. Give it a few seconds and try again.'
+      )
       setStatus('idle')
     }
   }
@@ -366,6 +395,32 @@ function App() {
         <header className="topbar">
           <h1>MockMate</h1>
         </header>
+        <div className="landing">
+          <p className="lede">
+            A voice-based AI mock interviewer. Upload a résumé and it builds an
+            interview around it — an intro, a résumé-grounded warm-up, then two
+            sandboxed Python questions with an interviewer watching as you type.
+            You get a scored evaluation at the end.
+          </p>
+          <ol className="landing-steps">
+            <li>Upload a résumé (optional — skip it for a general ML/GenAI interview)</li>
+            <li>Answer out loud; the interviewer probes your answers</li>
+            <li>Solve two coding questions, then read your scored evaluation</li>
+          </ol>
+          <p className="hint">
+            Built in the open —{' '}
+            <a href="https://github.com/SaixAbhinav/mockmate" target="_blank" rel="noreferrer">
+              source and architecture decisions on GitHub
+            </a>
+            .
+          </p>
+          {!apiReady && (
+            <p className="hint waking">
+              Waking the interviewer — the first visit can take up to a minute.
+              Go ahead and pick a résumé meanwhile.
+            </p>
+          )}
+        </div>
         <section className="start-panel">
           <label className="voice-row">
             Resume:

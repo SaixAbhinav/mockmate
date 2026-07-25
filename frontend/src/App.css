@@ -221,3 +221,27 @@ button.secondary {
 .dsa-pane {
   padding-bottom: 0;
 }
+
+/* Landing content on the start screen (ADR 0025): it gives the sleeping API
+   container time to wake while the Candidate reads. */
+.landing {
+  margin-bottom: 1.5rem;
+}
+
+.landing .lede {
+  font-size: 1.05rem;
+  line-height: 1.6;
+  margin: 0 0 0.75rem;
+}
+
+.landing-steps {
+  margin: 0 0 0.75rem;
+  padding-left: 1.25rem;
+  line-height: 1.7;
+}
+
+/* Shown only while the sleeping API container wakes. */
+.hint.waking {
+  font-style: italic;
+  opacity: 0.85;
+}
