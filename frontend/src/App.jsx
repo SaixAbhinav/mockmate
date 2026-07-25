@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
+import { api } from './api'
 import './App.css'
 
 // The watching interviewer (ADR 0018): snapshot on a typing pause; poll for
@@ -47,7 +48,7 @@ function App() {
   statusRef.current = status
 
   useEffect(() => {
-    fetch('/api/voices')
+    fetch(api('/api/voices'))
       .then((r) => r.json())
       .then((data) => {
         setVoices(data.voices)
@@ -66,7 +67,7 @@ function App() {
     if (phase !== 'done' || !sessionId) return
     const controller = new AbortController()
     setEvaluating(true)
-    fetch(`/api/session/${sessionId}/evaluation`, { signal: controller.signal })
+    fetch(api(`/api/session/${sessionId}/evaluation`), { signal: controller.signal })
       .then((r) => {
         if (!r.ok) throw new Error(`evaluation failed (${r.status})`)
         return r.json()
@@ -90,7 +91,7 @@ function App() {
   useEffect(() => {
     if (!dsa || dsaSubmitted || !sessionId || code === dsa.starter_code) return
     const timer = setTimeout(() => {
-      fetch(`/api/session/${sessionId}/dsa/snapshot`, {
+      fetch(api(`/api/session/${sessionId}/dsa/snapshot`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
@@ -109,7 +110,7 @@ function App() {
     const timer = setInterval(async () => {
       if (statusRef.current !== 'idle') return
       try {
-        const resp = await fetch(`/api/session/${sessionId}/dsa/check-in`, {
+        const resp = await fetch(api(`/api/session/${sessionId}/dsa/check-in`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ voice }),
@@ -139,7 +140,7 @@ function App() {
     setError(null)
     setStatus('thinking')
     try {
-      const resp = await fetch('/api/session', {
+      const resp = await fetch(api('/api/session'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -207,7 +208,7 @@ function App() {
     try {
       const form = new FormData()
       form.append('file', file)
-      const resp = await fetch('/api/resume', { method: 'POST', body: form })
+      const resp = await fetch(api('/api/resume'), { method: 'POST', body: form })
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({}))
         throw new Error(body.detail || `resume upload failed (${resp.status})`)
@@ -252,7 +253,7 @@ function App() {
     setError(null)
     const t0 = performance.now()
     try {
-      const resp = await fetch(`/api/session/${sessionId}/answer`, {
+      const resp = await fetch(api(`/api/session/${sessionId}/answer`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transcript: text, voice }),
@@ -274,7 +275,7 @@ function App() {
     setRunning(true)
     setError(null)
     try {
-      const resp = await fetch(`/api/session/${sessionId}/dsa/run`, {
+      const resp = await fetch(api(`/api/session/${sessionId}/dsa/run`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
@@ -292,7 +293,7 @@ function App() {
     setStatus('thinking')
     setError(null)
     try {
-      const resp = await fetch(`/api/session/${sessionId}/dsa/submit`, {
+      const resp = await fetch(api(`/api/session/${sessionId}/dsa/submit`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, voice }),
@@ -332,7 +333,7 @@ function App() {
         const blob = new Blob(chunks, { type: recorder.mimeType })
         const form = new FormData()
         form.append('file', blob, 'answer.webm')
-        const resp = await fetch('/api/transcribe', { method: 'POST', body: form })
+        const resp = await fetch(api('/api/transcribe'), { method: 'POST', body: form })
         if (!resp.ok) {
           const body = await resp.json().catch(() => ({}))
           throw new Error(body.detail || `transcription failed (${resp.status})`)
