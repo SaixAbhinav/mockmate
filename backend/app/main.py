@@ -85,9 +85,25 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="MockMate")
 
+
+def _cors_origins() -> list[str]:
+    """Resolve the allowed browser origins.
+
+    Production serves the SPA from a static site that *rewrites* /api/* to this
+    service, so the browser sees one origin and needs no CORS at all (ADR 0025).
+    This stays configurable so a deployed image carries no hardcoded dev origin,
+    and so the app still works if that rewrite is ever swapped for a direct
+    cross-origin call.
+    """
+    raw = os.getenv("CORS_ORIGINS", "").strip()
+    if not raw:
+        return ["http://localhost:5173"]
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=_cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
