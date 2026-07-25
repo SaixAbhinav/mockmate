@@ -21,6 +21,9 @@ RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
 USER appuser
 
-# Render supplies $PORT. The shell form is required so it expands at runtime.
+# Render supplies $PORT, so a shell is needed to expand it - but `exec` replaces
+# that shell with uvicorn, leaving uvicorn as PID 1. Without it uvicorn would be
+# a child of sh and would never see Render's SIGTERM on redeploy, turning every
+# deploy into a hard kill after the grace period.
 EXPOSE 10000
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"]
