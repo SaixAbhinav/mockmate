@@ -1,11 +1,40 @@
 from textwrap import dedent
 
-from app.runner import run_tests, summarize_run
+import pytest
+
+from app.runner import DEFAULT_TIMEOUT_SECONDS, default_timeout_seconds, run_tests, summarize_run
 
 CASES = [
     {"args": [[1, 2, 3]], "expected": [1, 3, 6]},
     {"args": [[]], "expected": []},
 ]
+
+
+@pytest.fixture(autouse=True)
+def _isolate_runner_timeout_env(monkeypatch):
+    # The Runner's default timeout now reads the environment (ADR 0025), so an
+    # ambient RUNNER_TIMEOUT_SECONDS would otherwise leak into every test here.
+    monkeypatch.delenv("RUNNER_TIMEOUT_SECONDS", raising=False)
+
+
+def test_default_timeout_reads_the_environment(monkeypatch):
+    monkeypatch.setenv("RUNNER_TIMEOUT_SECONDS", "12.5")
+    assert default_timeout_seconds() == 12.5
+
+
+def test_default_timeout_falls_back_when_unset():
+    assert default_timeout_seconds() == DEFAULT_TIMEOUT_SECONDS
+
+
+def test_default_timeout_ignores_a_malformed_value(monkeypatch):
+    # A deploy typo must not make every Submission fail; fall back instead.
+    monkeypatch.setenv("RUNNER_TIMEOUT_SECONDS", "soon")
+    assert default_timeout_seconds() == DEFAULT_TIMEOUT_SECONDS
+
+
+def test_default_timeout_ignores_a_non_positive_value(monkeypatch):
+    monkeypatch.setenv("RUNNER_TIMEOUT_SECONDS", "0")
+    assert default_timeout_seconds() == DEFAULT_TIMEOUT_SECONDS
 
 
 def test_passing_solution_passes_every_case():
