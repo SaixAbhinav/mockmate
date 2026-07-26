@@ -43,6 +43,7 @@ index that drifts from the ADRs is worse than no index.
 | [0023](0023-resume-driven-domain.md) | The résumé decides the domain | accepted |
 | [0024](0024-offline-question-generation.md) | Generate banks offline, gate by machine, review by hand | accepted |
 | [0025](0025-deploy-render-static-plus-api.md) | Deploy on Render as a static SPA plus a single API container | accepted |
+| [0026](0026-stt-resume-prompt.md) | Bias transcription with a résumé-derived vocabulary digest | accepted |
 
 ## Open — decided direction, not yet closed out
 

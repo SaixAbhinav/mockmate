@@ -14,19 +14,34 @@ class SttUnavailableError(Exception):
     """Raised when no STT backend is configured."""
 
 
-async def transcribe(audio: bytes, filename: str, content_type: str) -> str:
+async def transcribe(
+    audio: bytes,
+    filename: str,
+    content_type: str,
+    prompt: str | None = None,
+) -> str:
+    """Transcribe recorded audio.
+
+    `prompt` is an optional vocabulary digest that biases decoding toward terms
+    Whisper cannot otherwise know - the Candidate's name, institution and
+    project names (ADR 0026). Omitted when absent or blank: an empty prompt
+    biases nothing, and prompt text can bleed into the transcript.
+    """
     key = os.getenv("GROQ_API_KEY")
     if not key:
         raise SttUnavailableError(
             "Voice input needs a GROQ_API_KEY in backend/.env (free at "
             "console.groq.com). The text box works without it."
         )
+    data = {"model": "whisper-large-v3-turbo", "language": "en"}
+    if prompt and prompt.strip():
+        data["prompt"] = prompt.strip()
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
             "https://api.groq.com/openai/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {key}"},
             files={"file": (filename, audio, content_type)},
-            data={"model": "whisper-large-v3-turbo", "language": "en"},
+            data=data,
         )
         resp.raise_for_status()
         return resp.json()["text"].strip()

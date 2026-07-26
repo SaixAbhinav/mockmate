@@ -3,7 +3,75 @@ from io import BytesIO
 import pytest
 from pypdf import PdfWriter
 
-from app.resume import MAX_RESUME_CHARS, ResumeError, extract_resume_text
+from app.resume import (
+    MAX_DIGEST_CHARS,
+    MAX_RESUME_CHARS,
+    ResumeError,
+    extract_resume_text,
+    vocabulary_digest,
+)
+
+
+# The digest biases Whisper toward the proper nouns it otherwise mangles
+# (ADR 0026). Cases below are the real misreadings from a deployed Session.
+
+_RESUME = """\
+Sai Abhinav
+Machine Learning Engineer
+
+EDUCATION
+Vivekananda Institute of Professional Studies
+
+PROJECTS
+Workflow Copilot: automates email triage.
+SmartSignal: anomaly detection over sensor streams.
+Trained a classifier on the HAM10000 dataset using PyTorch.
+"""
+
+
+def test_digest_includes_the_candidate_name():
+    assert "Sai Abhinav" in vocabulary_digest(_RESUME)
+
+
+def test_digest_keeps_a_multi_word_institution_together():
+    # "Vivekan and the Institute" was the real misreading; connectors like "of"
+    # must not split the phrase.
+    assert "Vivekananda Institute of Professional Studies" in vocabulary_digest(_RESUME)
+
+
+def test_digest_includes_camel_case_product_names():
+    digest = vocabulary_digest(_RESUME)
+    assert "Workflow Copilot" in digest
+    assert "SmartSignal" in digest
+
+
+def test_digest_includes_alphanumeric_terms():
+    assert "HAM10000" in vocabulary_digest(_RESUME)
+
+
+def test_digest_drops_section_headings():
+    digest = vocabulary_digest(_RESUME)
+    assert "EDUCATION" not in digest
+    assert "PROJECTS" not in digest
+
+
+def test_digest_does_not_repeat_terms():
+    digest = vocabulary_digest("PyTorch and PyTorch and PyTorch again.")
+    assert digest.count("PyTorch") == 1
+
+
+def test_digest_is_capped():
+    text = " ".join(f"Alphaterm{i}" for i in range(500))
+    assert len(vocabulary_digest(text)) <= MAX_DIGEST_CHARS
+
+
+def test_digest_of_unremarkable_prose_is_empty():
+    # Nothing distinctive to bias toward; sentence-initial words are not names.
+    assert vocabulary_digest("the quick brown fox jumped over it") == ""
+
+
+def test_digest_of_empty_text_is_empty():
+    assert vocabulary_digest("") == ""
 
 
 def test_txt_resume_is_returned_as_text():

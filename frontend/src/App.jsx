@@ -410,6 +410,10 @@ function App() {
         const blob = new Blob(chunks, { type: recorder.mimeType })
         const form = new FormData()
         form.append('file', blob, 'answer.webm')
+        // Lets the backend prime Whisper with this Session's resume vocabulary
+        // so names and project titles survive transcription (ADR 0026). The
+        // digest stays server-side; only the id the client already has is sent.
+        if (sessionId) form.append('session_id', sessionId)
         const resp = await fetch(api('/api/transcribe'), { method: 'POST', body: form })
         if (!resp.ok) {
           const body = await resp.json().catch(() => ({}))
