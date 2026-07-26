@@ -10,6 +10,15 @@ import './App.css'
 const SNAPSHOT_DEBOUNCE_MS = 2000
 const CHECK_IN_POLL_MS = 25000
 
+// Guards against submitting a recording that captured no speech. Whisper answers
+// silence with confident filler rather than an empty string, so an unchecked
+// clip becomes a wrong answer to the Question instead of a retry prompt.
+// Measured against real clips: silence peaks near zero while speech peaks well
+// above 0.1, even when the speaker is quiet or far from the microphone.
+const SPEECH_PEAK_THRESHOLD = 0.04
+const MIN_RECORDING_MS = 1000
+const MIN_TRANSCRIPT_CHARS = 2
+
 // Inferred labels are already human-readable; only the curated bank's own slug
 // needs prettifying (ADR 0023).
 const DOMAIN_LABELS = { ml_genai: 'ML / GenAI' }
@@ -354,9 +363,48 @@ function App() {
     }
     const recorder = new MediaRecorder(stream)
     const chunks = []
+
+    // Whisper hallucinates on silence rather than returning nothing - a recording
+    // that captured no speech comes back as confident filler ("Thank you.",
+    // "Maybe, maybe, maybe."), which then gets submitted as the Candidate's
+    // answer and derails the interview. So measure whether anyone actually
+    // spoke, and refuse to send the clip if not.
+    //
+    // Peak amplitude is measured directly rather than inferred from blob size:
+    // size depends on the browser's codec and bitrate, amplitude does not.
+    const audioCtx = new AudioContext()
+    const analyser = audioCtx.createAnalyser()
+    analyser.fftSize = 2048
+    audioCtx.createMediaStreamSource(stream).connect(analyser)
+    const samples = new Uint8Array(analyser.fftSize)
+    let peak = 0
+    const levelTimer = setInterval(() => {
+      analyser.getByteTimeDomainData(samples)
+      for (let i = 0; i < samples.length; i++) {
+        const amplitude = Math.abs(samples[i] - 128) / 128
+        if (amplitude > peak) peak = amplitude
+      }
+    }, 100)
+    const startedAt = Date.now()
+
     recorder.ondataavailable = (e) => chunks.push(e.data)
     recorder.onstop = async () => {
+      clearInterval(levelTimer)
+      audioCtx.close().catch(() => {})
       stream.getTracks().forEach((t) => t.stop())
+
+      const heardSpeech = peak >= SPEECH_PEAK_THRESHOLD
+      const longEnough = Date.now() - startedAt >= MIN_RECORDING_MS
+      if (!heardSpeech || !longEnough) {
+        setError(
+          longEnough
+            ? "I didn't catch that — check your microphone, or type your answer below."
+            : "That recording was too short — hold it a moment longer, or type your answer below."
+        )
+        setStatus('idle')
+        return
+      }
+
       setStatus('transcribing')
       try {
         const blob = new Blob(chunks, { type: recorder.mimeType })
@@ -368,6 +416,13 @@ function App() {
           throw new Error(body.detail || `transcription failed (${resp.status})`)
         }
         const data = await resp.json()
+        // Even with speech present Whisper can return nothing usable; submitting
+        // that would answer the Question with noise.
+        if (!data.transcript || data.transcript.trim().length < MIN_TRANSCRIPT_CHARS) {
+          setError("I didn't catch that — try again, or type your answer below.")
+          setStatus('idle')
+          return
+        }
         await sendTranscript(data.transcript)
       } catch (err) {
         setError(String(err))
