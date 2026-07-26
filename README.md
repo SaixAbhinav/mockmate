@@ -66,7 +66,7 @@ uv pip install -r requirements-dev.txt
 uv run pytest
 ```
 
-266 passed.
+284 passed.
 
 ## Generating questions (dev chore)
 

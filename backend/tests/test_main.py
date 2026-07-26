@@ -42,6 +42,73 @@ def test_cors_origins_ignores_blank_entries(monkeypatch):
     assert _cors_origins() == ["https://a.example"]
 
 
+# --- transcription vocabulary digest (ADR 0026) ---
+
+
+@pytest.fixture
+def stt_spy(monkeypatch):
+    """Capture what the transcribe endpoint passes down to the STT layer."""
+    from app import main as main_module
+
+    seen = {}
+
+    async def fake_transcribe(audio, filename, content_type, prompt=None):
+        seen["prompt"] = prompt
+        return "a transcript"
+
+    monkeypatch.setattr(main_module, "transcribe", fake_transcribe)
+    return seen
+
+
+def _audio_upload():
+    return {"file": ("answer.webm", b"fake-audio", "audio/webm")}
+
+
+def test_transcribe_without_a_session_sends_no_prompt(client, stt_spy):
+    resp = client.post("/api/transcribe", files=_audio_upload())
+    assert resp.status_code == 200
+    assert stt_spy["prompt"] is None
+
+
+def test_transcribe_with_an_unknown_session_still_works(client, stt_spy):
+    # Voice input must never fail because a digest could not be found.
+    resp = client.post(
+        "/api/transcribe", files=_audio_upload(), data={"session_id": "nope"}
+    )
+    assert resp.status_code == 200
+    assert stt_spy["prompt"] is None
+
+
+def test_transcribe_uses_the_sessions_digest(client, stt_spy):
+    resume = (
+        "Sai Abhinav\nMachine Learning Engineer\n\n"
+        "EDUCATION\nVivekananda Institute of Professional Studies\n\n"
+        "PROJECTS\nWorkflow Copilot automates email triage. SmartSignal detects "
+        "anomalies over sensor streams. Classifier on the HAM10000 dataset.\n"
+    ) * 3
+    upload = client.post("/api/resume", files={"file": ("cv.txt", resume.encode(), "text/plain")})
+    resume_id = upload.json()["resume_id"]
+    # allow_bank_fallback because the keyless ScriptedProvider generates no
+    # warm-ups (ADR 0015); the digest comes from the resume either way.
+    session_id = client.post(
+        "/api/session", json={"resume_id": resume_id, "allow_bank_fallback": True}
+    ).json()["session_id"]
+
+    client.post("/api/transcribe", files=_audio_upload(), data={"session_id": session_id})
+
+    assert "Sai Abhinav" in stt_spy["prompt"]
+    assert "SmartSignal" in stt_spy["prompt"]
+    assert "Vivekananda Institute of Professional Studies" in stt_spy["prompt"]
+
+
+def test_session_without_a_resume_has_no_digest(client, stt_spy):
+    session_id = client.post("/api/session", json={}).json()["session_id"]
+
+    client.post("/api/transcribe", files=_audio_upload(), data={"session_id": session_id})
+
+    assert stt_spy["prompt"] is None
+
+
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)

@@ -20,7 +20,7 @@ import time
 import uuid
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -36,7 +36,7 @@ from .agent import (
 from .evaluator import build_evaluator_graph, evaluate_session
 from .providers import ProviderError, ProviderUnavailableError, WatchDecision, get_provider
 from .questions import FALLBACK_DOMAIN
-from .resume import ResumeError, extract_resume_text
+from .resume import ResumeError, extract_resume_text, vocabulary_digest
 from .runner import RunResult, run_tests, summarize_run
 from .session_store import get_store
 from .stt import SttUnavailableError, transcribe
@@ -118,6 +118,12 @@ _evaluation_locks: dict[str, asyncio.Lock] = {}
 # Uploaded resumes, reduced to capped plain text (ADR 0015). In-memory like
 # everything else (ADR 0007): anonymous, dies with the process. PII - never log.
 _resumes: dict[str, str] = {}
+
+# Per-Session vocabulary digests priming speech-to-text (ADR 0026). Kept beside
+# _resumes rather than in the graph state: it is a transcription concern, not
+# something the interview graph or the evaluator ever reads. Same in-memory
+# posture and the same deferred-cleanup debt as _resumes (ADR 0007/0015).
+_stt_prompts: dict[str, str] = {}
 
 # The watcher's clock, module-level so tests can monkeypatch time instead of
 # sleeping through 75-second cooldowns (ADR 0018).
@@ -389,13 +395,20 @@ async def voices():
 
 
 @app.post("/api/transcribe")
-async def transcribe_audio(file: UploadFile):
+async def transcribe_audio(file: UploadFile, session_id: str | None = Form(None)):
     audio = await file.read()
     if not audio:
         raise HTTPException(status_code=400, detail="empty audio upload")
+    # Optional on purpose: voice input has to keep working before a Session
+    # exists, without a resume, and in the keyless demo (ADR 0026). An unknown
+    # id degrades to no prompt rather than failing the Turn.
+    prompt = _stt_prompts.get(session_id) if session_id else None
     try:
         text = await transcribe(
-            audio, file.filename or "answer.webm", file.content_type or "audio/webm"
+            audio,
+            file.filename or "answer.webm",
+            file.content_type or "audio/webm",
+            prompt=prompt,
         )
     except SttUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -467,6 +480,15 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
         warm_up_questions=warm_up.questions if warm_up is not None else None,
     )
     await get_store().save(state)
+
+    # Built once here rather than per Turn, keeping the work off the
+    # conversational critical path (ADR 0015's argument, reapplied). Derived
+    # from the resume itself, so it survives a bank fallback - the Candidate's
+    # name and projects are worth priming even when generation failed.
+    if resume_text is not None:
+        digest = vocabulary_digest(resume_text)
+        if digest:
+            _stt_prompts[session_id] = digest
 
     audio = await synthesize(state["current_question"]["question"], req.voice)
     number, total = _progress(state)

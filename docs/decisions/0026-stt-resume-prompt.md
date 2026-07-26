@@ -1,6 +1,6 @@
 # ADR 0026: Bias transcription with a résumé-derived vocabulary digest
 
-Date: 2026-07-26 · Status: proposed
+Date: 2026-07-26 · Accepted: 2026-07-26 · Status: accepted
 
 ## Context
 
@@ -101,10 +101,20 @@ résumé itself.**
 - **The digest inherits `_resumes`' lifetime** — in-memory, dies with the process
   (ADR 0007), retention still deferred to ADR 0009. No new storage question.
 
-## Open question: how the digest is extracted
+## Resolved: the digest is extracted by heuristics
 
-Deliberately unresolved — it is the one part worth arguing about, and it is
-cheap to change later since the digest is built in one place.
+Decided **(b), heuristics**, and implemented. `vocabulary_digest` in `resume.py`
+collects capitalised phrases, CamelCase product names, and alphanumeric
+identifiers, allows name-internal connectors so "Vivekananda Institute of
+Professional Studies" survives whole, drops section headings and sentence-opening
+verbs, dedupes, and caps the result at 600 characters.
+
+One correction fell out of building it: `and` cannot be a connector. It joins
+*separate* items — "PyTorch and TensorFlow" — so treating it as name-internal
+fused distinct terms into one phrase that de-duplication could never match. Only
+genuinely name-internal words (`of`, `the`, `de`, `la`, `von`, `van`) connect.
+
+The options, for the record:
 
 - **(a) An LLM call at Session creation.** Ask the provider to pull proper nouns
   from the résumé. Most accurate; adds a second call to a path that already makes
@@ -117,10 +127,11 @@ cheap to change later since the digest is built in one place.
   extraction — but it systematically misses the Candidate's own name, which is
   the single worst-transcribed item in the evidence above.
 
-**Leaning (b), with the Candidate's name taken from the résumé's opening lines**
-— it adds no new failure mode to Session creation, and the evidence is that names
-and institutions are what break, which heuristics catch precisely because they
-are capitalised. Revisit toward (a) if heuristics prove too noisy in practice.
+**(b) was chosen** — it adds no new failure mode to Session creation, and the
+evidence is that names and institutions are what break, which heuristics catch
+precisely because they are capitalised. Revisit toward (a) if the digest proves
+too noisy in practice; it is built in one function, so swapping the method is
+contained.
 
 ## Alternatives considered
 
@@ -145,9 +156,22 @@ are capitalised. Revisit toward (a) if heuristics prove too noisy in practice.
 
 ## Status
 
-Proposed. The decision worth a second opinion is the privacy trade: résumé-derived
-vocabulary leaving the server on every voice Turn rather than once per Session.
-The provider is unchanged and the payload is a term list rather than the
-document, which is why this is recommended — but it is a real increase in
-exposure frequency, and "do nothing" remains a defensible answer for a
-portfolio demo.
+Accepted and implemented, with the privacy trade taken knowingly: résumé-derived
+vocabulary now leaves the server on every voice Turn rather than once per
+Session. The provider is unchanged (Groq already receives the full résumé at
+Session creation) and the payload is a term list rather than the document.
+
+**Measured, not assumed.** The same sentence transcribed with and without a
+digest, spoken by TTS and sent through the real endpoint:
+
+| | Institution | Product |
+|---|---|---|
+| Without digest | "Vivekanand Institute" | "Smart Signal" |
+| With digest | **"Vivekananda Institute"** | **"SmartSignal"** |
+
+Both of the errors this ADR was written to fix disappeared, and nothing else in
+the sentence changed.
+
+The hallucination risk named in Consequences did not materialise here, but that
+is one sample rather than evidence of absence — the guard that refuses to submit
+recordings which captured no speech is what actually bounds it, and it stays.

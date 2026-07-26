@@ -43,12 +43,12 @@ index that drifts from the ADRs is worse than no index.
 | [0023](0023-resume-driven-domain.md) | The résumé decides the domain | accepted |
 | [0024](0024-offline-question-generation.md) | Generate banks offline, gate by machine, review by hand | accepted |
 | [0025](0025-deploy-render-static-plus-api.md) | Deploy on Render as a static SPA plus a single API container | accepted |
+| [0026](0026-stt-resume-prompt.md) | Bias transcription with a résumé-derived vocabulary digest | accepted |
 
 ## Open — decided direction, not yet closed out
 
 | # | Title | Status | Where it stands |
 |---|---|---|---|
-| [0026](0026-stt-resume-prompt.md) | Bias transcription with a résumé-derived vocabulary digest | proposed | ADR written, no code. Fixes mangled proper nouns in voice answers. Open question: how the digest is extracted. Awaiting a call on the privacy trade. |
 | [0022](0022-weak-area-targeting.md) | Weak-area targeting | deferred | Deferred for v1: no users yet, value unproven, and it forces either the full accounts day (0009) or an identity model that contradicts it. Analysis kept; revisit when real usage demands it. |
 
 ## Not yet ADRs — parked threads
