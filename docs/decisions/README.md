@@ -48,6 +48,7 @@ index that drifts from the ADRs is worse than no index.
 
 | # | Title | Status | Where it stands |
 |---|---|---|---|
+| [0026](0026-stt-resume-prompt.md) | Bias transcription with a résumé-derived vocabulary digest | proposed | ADR written, no code. Fixes mangled proper nouns in voice answers. Open question: how the digest is extracted. Awaiting a call on the privacy trade. |
 | [0022](0022-weak-area-targeting.md) | Weak-area targeting | deferred | Deferred for v1: no users yet, value unproven, and it forces either the full accounts day (0009) or an identity model that contradicts it. Analysis kept; revisit when real usage demands it. |
 
 ## Not yet ADRs — parked threads
