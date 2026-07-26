@@ -3,7 +3,7 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import _log_level, app
+from app.main import _cors_origins, _log_level, app
 from app.providers import ProviderUnavailableError, Judgment
 
 
@@ -25,6 +25,21 @@ def test_log_level_tolerates_case_and_nonsense(monkeypatch, value, expected):
 def test_log_level_defaults_to_info_when_unset(monkeypatch):
     monkeypatch.delenv("LOG_LEVEL", raising=False)
     assert _log_level() == logging.INFO
+
+
+def test_cors_origins_defaults_to_the_dev_server(monkeypatch):
+    monkeypatch.delenv("CORS_ORIGINS", raising=False)
+    assert _cors_origins() == ["http://localhost:5173"]
+
+
+def test_cors_origins_splits_a_comma_separated_list(monkeypatch):
+    monkeypatch.setenv("CORS_ORIGINS", "https://a.example, https://b.example")
+    assert _cors_origins() == ["https://a.example", "https://b.example"]
+
+
+def test_cors_origins_ignores_blank_entries(monkeypatch):
+    monkeypatch.setenv("CORS_ORIGINS", "https://a.example,,  ,")
+    assert _cors_origins() == ["https://a.example"]
 
 
 @pytest.fixture

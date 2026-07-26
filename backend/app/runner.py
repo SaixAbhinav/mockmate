@@ -22,6 +22,24 @@ from pathlib import Path
 DEFAULT_TIMEOUT_SECONDS = 5.0
 _MAX_ERROR_CHARS = 2000
 
+
+def default_timeout_seconds() -> float:
+    """The timeout to use when a caller does not specify one.
+
+    Deployed free tiers are CPU-throttled, so a fixed 5s can fail a *correct*
+    solution on interpreter start-up alone (ADR 0025). Deploys raise this via
+    the environment rather than by editing the default. Parsed defensively: a
+    typo in a deploy variable must not make every Submission fail.
+    """
+    raw = os.environ.get("RUNNER_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_TIMEOUT_SECONDS
+
 # Exit codes the harness uses to distinguish "your code didn't load" from a
 # harness crash (which would be our bug, not the candidate's).
 _EXIT_CODE_FAILED_TO_LOAD = 3
@@ -100,10 +118,14 @@ def run_tests(
     code: str,
     function_name: str,
     test_cases: list[dict],
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    timeout_seconds: float | None = None,
 ) -> RunResult:
     """Run candidate code against a question's test cases in a sandboxed
-    subprocess. Synchronous - endpoint callers use asyncio.to_thread."""
+    subprocess. Synchronous - endpoint callers use asyncio.to_thread.
+
+    timeout_seconds=None resolves the env-aware default (ADR 0025)."""
+    if timeout_seconds is None:
+        timeout_seconds = default_timeout_seconds()
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         (tmp_path / "solution.py").write_text(code, encoding="utf-8")

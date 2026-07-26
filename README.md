@@ -66,7 +66,7 @@ uv pip install -r requirements-dev.txt
 uv run pytest
 ```
 
-259 passed.
+266 passed.
 
 ## Generating questions (dev chore)
 
@@ -88,6 +88,45 @@ GROQ_API_KEY=... uv run python -m scripts.generate_warm_up --topic rag --count 5
 Each writes to a gitignored `*.staging.yaml` (never the bank directly) and
 prints what it kept and why it dropped the rest. Reviewing is deletion, not
 authorship.
+
+## Deploying
+
+Deployed as two Render services behind one origin
+([ADR 0025](docs/decisions/0025-deploy-render-static-plus-api.md)): an always-on
+static site serving the SPA, which rewrites `/api/*` to a Docker web service
+running the API. The browser only ever sees one origin, so there is no CORS in
+production — the same thing `vite.config.js` does with a proxy in development.
+
+1. Push this repo to GitHub and create a **Blueprint** on Render pointing at
+   `render.yaml`.
+2. Set `GROQ_API_KEY` on the `mockmate-api` service when prompted (it is
+   `sync: false`, so it is never stored in git). Without it the app still runs,
+   using the scripted demo interviewer.
+3. After the API's first deploy, copy its real URL into the static site's
+   `/api/*` rewrite destination in `render.yaml` and redeploy. Render subdomains
+   are globally unique, so if `mockmate-api` is taken your service gets a
+   different name — use whatever URL Render actually assigned. Until this step
+   the rewrite points at a host that may not exist, so expect API calls to fail
+   on the very first deploy.
+4. **Smoke-test a POST** — upload a résumé on the live site. If it fails while
+   the page itself loads fine, the rewrite is not proxying request bodies: set
+   `VITE_API_BASE` on the static site to the API's URL and `CORS_ORIGINS` on the
+   API to the static site's URL, then redeploy both. The SPA then calls the API
+   directly and no rewrite is involved.
+
+The API runs on Render's free tier, so it **sleeps after 15 minutes idle** and
+takes 30–60s to wake. The static site never sleeps, so the page always loads
+instantly, and the start screen pings `/api/health` on mount to wake the API
+while you read. Sessions are in-memory
+([ADR 0007](docs/decisions/0007-session-state-in-memory.md)), so a redeploy ends
+any interview in progress.
+
+You can also run the container by itself:
+
+```bash
+docker build -t mockmate-api .
+docker run --rm -p 8080:8080 -e PORT=8080 -e GROQ_API_KEY=... mockmate-api
+```
 
 ## Design decisions
 

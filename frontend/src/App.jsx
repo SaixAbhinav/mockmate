@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
+import { api } from './api'
 import './App.css'
 
 // The watching interviewer (ADR 0018): snapshot on a typing pause; poll for
@@ -40,6 +41,7 @@ function App() {
   const [runReport, setRunReport] = useState(null)
   const [dsaSubmitted, setDsaSubmitted] = useState(false)
   const [running, setRunning] = useState(false)
+  const [apiReady, setApiReady] = useState(false)
   const recorderRef = useRef(null)
   const chatEndRef = useRef(null)
   const resumeUploadTokenRef = useRef(0)
@@ -47,13 +49,34 @@ function App() {
   statusRef.current = status
 
   useEffect(() => {
-    fetch('/api/voices')
+    fetch(api('/api/voices'))
       .then((r) => r.json())
       .then((data) => {
         setVoices(data.voices)
         setVoice(data.default)
       })
       .catch(() => setError('backend not reachable — is it running on port 8000?'))
+  }, [])
+
+  // A free-tier API container sleeps when idle and takes ~30-60s to wake
+  // (ADR 0025). Ping it as soon as the start screen renders so it boots while
+  // the Candidate reads and picks a resume, not after they click Start.
+  //
+  // Deliberately no timeout: aborting would kill a request that was going to
+  // succeed. The wait is fine; leaving the Candidate to guess is not, so the
+  // result is tracked and shown.
+  //
+  // Only a 2xx counts as awake. fetch() resolves for 5xx as well, so a plain
+  // .then() would clear the notice on the 502/503 a platform serves *while*
+  // the container is still starting - exactly when the notice is wanted. A
+  // failure leaves the notice up, which reads as "still waking" and is the
+  // honest thing to show when the API is not answering.
+  useEffect(() => {
+    fetch(api('/api/health'))
+      .then((r) => {
+        if (r.ok) setApiReady(true)
+      })
+      .catch(() => {})
   }, [])
 
   // Keep the newest message in view, chat-app style (wireframe v1).
@@ -66,7 +89,7 @@ function App() {
     if (phase !== 'done' || !sessionId) return
     const controller = new AbortController()
     setEvaluating(true)
-    fetch(`/api/session/${sessionId}/evaluation`, { signal: controller.signal })
+    fetch(api(`/api/session/${sessionId}/evaluation`), { signal: controller.signal })
       .then((r) => {
         if (!r.ok) throw new Error(`evaluation failed (${r.status})`)
         return r.json()
@@ -90,7 +113,7 @@ function App() {
   useEffect(() => {
     if (!dsa || dsaSubmitted || !sessionId || code === dsa.starter_code) return
     const timer = setTimeout(() => {
-      fetch(`/api/session/${sessionId}/dsa/snapshot`, {
+      fetch(api(`/api/session/${sessionId}/dsa/snapshot`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
@@ -109,7 +132,7 @@ function App() {
     const timer = setInterval(async () => {
       if (statusRef.current !== 'idle') return
       try {
-        const resp = await fetch(`/api/session/${sessionId}/dsa/check-in`, {
+        const resp = await fetch(api(`/api/session/${sessionId}/dsa/check-in`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ voice }),
@@ -139,7 +162,7 @@ function App() {
     setError(null)
     setStatus('thinking')
     try {
-      const resp = await fetch('/api/session', {
+      const resp = await fetch(api('/api/session'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -169,8 +192,15 @@ function App() {
       setPhase(null)
       setScreen('interview')
       await playAudio(data.audio_b64)
-    } catch (err) {
-      setError(String(err))
+    } catch {
+      // A raw fetch error is not something to show a Candidate. On a first
+      // visit the likeliest cause is simply that the API is still waking
+      // (ADR 0025), so say that rather than printing the exception.
+      setError(
+        apiReady
+          ? 'Could not start the interview. Please try again.'
+          : 'The interviewer is still waking up. Give it a few seconds and try again.'
+      )
       setStatus('idle')
     }
   }
@@ -207,7 +237,7 @@ function App() {
     try {
       const form = new FormData()
       form.append('file', file)
-      const resp = await fetch('/api/resume', { method: 'POST', body: form })
+      const resp = await fetch(api('/api/resume'), { method: 'POST', body: form })
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({}))
         throw new Error(body.detail || `resume upload failed (${resp.status})`)
@@ -252,7 +282,7 @@ function App() {
     setError(null)
     const t0 = performance.now()
     try {
-      const resp = await fetch(`/api/session/${sessionId}/answer`, {
+      const resp = await fetch(api(`/api/session/${sessionId}/answer`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transcript: text, voice }),
@@ -274,7 +304,7 @@ function App() {
     setRunning(true)
     setError(null)
     try {
-      const resp = await fetch(`/api/session/${sessionId}/dsa/run`, {
+      const resp = await fetch(api(`/api/session/${sessionId}/dsa/run`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
@@ -292,7 +322,7 @@ function App() {
     setStatus('thinking')
     setError(null)
     try {
-      const resp = await fetch(`/api/session/${sessionId}/dsa/submit`, {
+      const resp = await fetch(api(`/api/session/${sessionId}/dsa/submit`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, voice }),
@@ -332,7 +362,7 @@ function App() {
         const blob = new Blob(chunks, { type: recorder.mimeType })
         const form = new FormData()
         form.append('file', blob, 'answer.webm')
-        const resp = await fetch('/api/transcribe', { method: 'POST', body: form })
+        const resp = await fetch(api('/api/transcribe'), { method: 'POST', body: form })
         if (!resp.ok) {
           const body = await resp.json().catch(() => ({}))
           throw new Error(body.detail || `transcription failed (${resp.status})`)
@@ -365,6 +395,32 @@ function App() {
         <header className="topbar">
           <h1>MockMate</h1>
         </header>
+        <div className="landing">
+          <p className="lede">
+            A voice-based AI mock interviewer. Upload a résumé and it builds an
+            interview around it — an intro, a résumé-grounded warm-up, then two
+            sandboxed Python questions with an interviewer watching as you type.
+            You get a scored evaluation at the end.
+          </p>
+          <ol className="landing-steps">
+            <li>Upload a résumé (optional — skip it for a general ML/GenAI interview)</li>
+            <li>Answer out loud; the interviewer probes your answers</li>
+            <li>Solve two coding questions, then read your scored evaluation</li>
+          </ol>
+          <p className="hint">
+            Built in the open —{' '}
+            <a href="https://github.com/SaixAbhinav/mockmate" target="_blank" rel="noreferrer">
+              source and architecture decisions on GitHub
+            </a>
+            .
+          </p>
+          {!apiReady && (
+            <p className="hint waking">
+              Waking the interviewer — the first visit can take up to a minute.
+              Go ahead and pick a résumé meanwhile.
+            </p>
+          )}
+        </div>
         <section className="start-panel">
           <label className="voice-row">
             Resume:
