@@ -35,15 +35,16 @@ services:
       # the SPA calls the API directly cross-origin instead, which CORS_ORIGINS
       # on the API service allows.
       # - key: VITE_API_BASE
-      #   value: https://mockmate-api.onrender.com
+      #   value: https://mockmate-api-9qve.onrender.com
     routes:
-      # Proxy the API so the browser only ever sees this origin. Replace the
-      # host below with the API service's real URL after its first deploy.
-      # Render skips rules when a real file exists at the path, so this cannot
-      # shadow built assets.
+      # Proxy the API so the browser only ever sees this origin. Render assigned
+      # the -9qve suffix because subdomains are globally unique, so this must
+      # match the API service's real URL rather than its service name. Render
+      # skips rules when a real file exists at the path, so this cannot shadow
+      # built assets.
       - type: rewrite
         source: /api/*
-        destination: https://mockmate-api.onrender.com/api/*
+        destination: https://mockmate-api-9qve.onrender.com/api/*
       # SPA fallback: every other path serves the app shell.
       - type: rewrite
         source: /*
