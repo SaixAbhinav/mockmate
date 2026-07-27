@@ -1,6 +1,6 @@
 # ADR 0027: The check-in policy owns its own state
 
-Date: 2026-07-27 · Status: proposed
+Date: 2026-07-27 · Accepted: 2026-07-27 · Status: accepted
 
 ## Context
 
@@ -70,7 +70,16 @@ an argument.** `main.py` learns five names where it currently learns thirteen.
   the rule that a Provider failure answers *silent*, the rule that the look is
   recorded even on failure so a failing Provider is not hammered on the next
   poll, and Interjection/Hint counting. `CheckIn` is a frozen dataclass of
-  `action` and `remark`, mirroring `WatchDecision`.
+  `action`, `remark`, and `failure`, mirroring `WatchDecision`.
+
+  `failure` — the Provider's exception class name, or `None` — was added
+  during implementation and is load-bearing. To the Candidate a failed look
+  and a closed gate are both silence, so `action` cannot carry the
+  difference; without the extra field the endpoint could no longer tell them
+  apart, and the failure log lost its Session id. Check-ins fail silent by
+  design, so that line is the only trace that a Provider is failing. The
+  Watcher reports the failure, `main.py` logs it where the Session id lives,
+  and `watcher.py` needs no logger of its own.
 
 - **`def observe_snapshot(...)` / `def observe_run(...)`** — the two events the
   endpoints genuinely originate, renamed from `record_snapshot` / `note_run` for
@@ -141,6 +150,18 @@ end-to-end coverage is what proves it.
 - **This amends ADR 0018 rather than superseding it.** The policy is unchanged;
   only its address is.
 
+- **`get_provider()` loses its exception guard, latently.** It used to be
+  evaluated *inside* the endpoint's `try`, so a `ProviderError` raised while
+  constructing a Provider would have answered silent. As an eager argument to
+  `check_in` it is now outside any `try`, and such a failure would surface as a
+  500 — breaking the promise that a poll never surfaces an error. Verified this
+  cannot happen today: `get_provider()` is two `os.getenv` calls and a
+  constructor, and no Provider's `__init__` does more than store its key
+  (`httpx` clients are built per call, not per instance). Recorded because
+  nothing in the tests would catch it if `get_provider()` ever gains a raising
+  path. It is also now constructed on every poll rather than only on a due
+  look, which costs one small object and no I/O.
+
 ## Deliberately not fixed here: chat does not start the interjection cooldown
 
 Found while writing this ADR, recorded so it is not lost. `note_chat` increments
@@ -204,6 +225,25 @@ rule somewhere to live.
 
 ## Status
 
-Proposed. Behaviour-preserving by construction; the acceptance condition is that
-`test_main.py` passes unchanged, plus new direct tests for the policy paths that
-previously had none.
+Accepted and implemented. The acceptance condition was met as written:
+`backend/tests/test_main.py` is **byte-identical** to its pre-change state, and
+the suite went from 284 to 292 passing — eight new direct tests for policy paths
+that previously had none (Offer-beats-look ordering, silence on Provider
+failure, the look recorded even on failure, a due look that stays silent still
+recorded, Hint counting, and Ask-is-not-a-Hint).
+
+`main.py`'s `watcher` import drops from 13 names to 6 — three of which are the
+coding-chat holdouts this ADR deliberately left alone, so the check-in side
+costs three. `dsa_check_in` goes from 48 lines to 21. `watcher.py` contains no
+`question[...]` access, and imports nothing from `agent`.
+
+**Two changes were made after an adversarial review of the implementation**, and
+both are recorded above rather than quietly folded in: the `failure` field on
+`CheckIn`, which restores the Session id to the failure log; and the
+`get_provider()` guard note, which is latent rather than live. The review also
+found that deleting `note_check_in` from the Offer path left every unit test
+green — only the end-to-end `test_main.py` caught it — so that path gained a
+direct assertion, verified by re-running the mutation and watching the unit test
+fail.
+
+The bug in the section above remains unfixed, deliberately.

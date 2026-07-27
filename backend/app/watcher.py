@@ -1,9 +1,10 @@
 """Check-in policy for the watching interviewer (ADR 0012/0018).
 
-Pure functions over a plain "watch" dict that lives on the current DSA
-question (next to "submission"): the endpoints supply the clock, these
-functions decide. Keeping the policy free of I/O makes every cooldown rule
-a one-line unit test.
+The policy over a plain "watch" dict that lives on the current DSA
+question (next to "submission"): the caller supplies the clock and the
+Provider, `check_in` decides (ADR 0027). The gates it composes -
+offer_due, check_in_due, is_stuck - stay pure, so every cooldown rule is
+still a one-line unit test.
 
 Two clocks: started_at is when the question appeared (the Offer's clock -
 120 s of silence earns an invitation to ask for clarification), and
@@ -12,7 +13,14 @@ first LLM look is one interval after that). Reading is never watched.
 
 Only the latest Snapshot is kept - stuck detection needs the code the
 watcher saw at its last look, not a history.
+
+The Watcher never touches InterviewState: it returns the updated watch
+and a decision, and the caller stores, speaks and answers the poll.
 """
+
+from dataclasses import dataclass
+
+from .providers import LLMProvider, ProviderError, WatchDecision
 
 CHECK_IN_INTERVAL_SECONDS = 75.0  # ADR 0012's ~60-90 s, split down the middle
 INTERJECTION_COOLDOWN_SECONDS = 90.0
@@ -50,7 +58,7 @@ def start_watch(now: float) -> dict:
     }
 
 
-def record_snapshot(watch: dict, code: str, now: float) -> dict:
+def observe_snapshot(watch: dict, code: str, now: float) -> dict:
     """The Candidate paused typing; keep only the latest code. The first
     Snapshot starts the watcher's clock (ADR 0018)."""
     typing_started = watch["typing_started_at"]
@@ -124,7 +132,7 @@ def note_interjection(watch: dict, now: float, action: str) -> dict:
     }
 
 
-def note_run(watch: dict, passed: int, total: int) -> dict:
+def observe_run(watch: dict, passed: int, total: int) -> dict:
     """Run telemetry (ADR 0018): catches the churning Candidate whose code
     keeps changing but whose tests keep failing - invisible to is_stuck."""
     return {
@@ -150,3 +158,85 @@ def describe_runs(watch: dict) -> str:
         f"the latest run passed {watch['last_passed']} of "
         f"{watch['last_total']} cases."
     )
+
+
+def tally(watch: dict) -> dict:
+    """The counts the completed record carries into the Evaluation (ADR
+    0018/0020), so no other module indexes raw watch keys (ADR 0027)."""
+    return {
+        "interjections": watch["interjections"],
+        "hints": watch["hints"],
+        "chats": watch["chats"],
+        "runs": watch["runs"],
+    }
+
+
+@dataclass(frozen=True)
+class CheckIn:
+    """What one Check-in came to, mirroring WatchDecision (ADR 0018).
+
+    Distinct from it because two of the actions are the policy's own: the
+    deterministic Offer costs no LLM call, and a Provider that cannot
+    answer collapses to silence."""
+
+    action: str  # "silent" | "offer" | "ask" | "hint"
+    remark: str
+    # The Provider's exception class name when the look could not be taken.
+    # To the Candidate a failed look and a closed gate are both silence, so
+    # the action cannot carry the difference - but the caller needs it to
+    # log a failing Provider against the Session it happened in (ADR 0027).
+    failure: str | None = None
+
+
+async def check_in(
+    watch: dict,
+    *,
+    question_text: str,
+    starter_code: str,
+    now: float,
+    provider: LLMProvider,
+) -> tuple[dict, CheckIn]:
+    """Take one Check-in and return the updated watch with it (ADR 0018).
+
+    The Offer goes first: two minutes of silence needs no model to
+    interpret. Otherwise the gates (typing-anchored interval, cooldown,
+    cap) decide whether this poll becomes an LLM look at all, and both
+    cooldowns and provider failures answer silent - a poll never surfaces
+    an error.
+
+    Scalars, not the Question: the Watcher stays ignorant of the shape of
+    the state it is stored in (ADR 0027).
+    """
+    if offer_due(watch, now):
+        watch = note_check_in(watch, starter_code, now)
+        watch = note_interjection(watch, now, action="offer")
+        return watch, CheckIn(action="offer", remark=OFFER_REMARK)
+
+    if not check_in_due(watch, now):
+        return watch, CheckIn(action="silent", remark="")
+
+    code = watch["code"] if watch["code"] is not None else starter_code
+    failure = None
+    try:
+        decision = await provider.watch_code(
+            question=question_text,
+            code=code,
+            stuck=is_stuck(watch, starter_code),
+            seconds_elapsed=now - watch["started_at"],
+            runs_summary=describe_runs(watch),
+        )
+    except ProviderError as exc:
+        # A watcher that can't think stays quiet (ADR 0018). The class name
+        # is all that leaves this module - never the code, never the
+        # chained traceback (Gemini's key rides in its request URL, ADR 0013).
+        failure = type(exc).__name__
+        decision = WatchDecision(action="silent", remark="")
+
+    # The look is recorded even on failure, so a failing provider is not
+    # hammered again on the next poll.
+    watch = note_check_in(watch, code, now)
+    if decision.action == "silent":
+        return watch, CheckIn(action="silent", remark="", failure=failure)
+
+    watch = note_interjection(watch, now, decision.action)
+    return watch, CheckIn(action=decision.action, remark=decision.remark)

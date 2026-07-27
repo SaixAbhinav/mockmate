@@ -19,6 +19,7 @@ from langgraph.graph import END, StateGraph
 from .providers import LLMProvider, ProviderMalformedError
 from .questions import FALLBACK_DOMAIN, Question, plan_dsa, plan_warm_up
 from .runner import RunResult, summarize_run
+from .watcher import start_watch, tally
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,21 @@ def record_coding_chat(state: InterviewState, utterance: str, reply: str) -> Int
     }
 
 
+def current_watch(state: InterviewState, now: float) -> dict:
+    """The current question's watch, started on first use (ADR 0018).
+
+    Lazy creation lives here, not in `watcher`: `question["watch"]` is
+    InterviewState's shape, and this module owns InterviewState (ADR 0027).
+    Endpoints that touch a watch no longer have to remember the idiom.
+    """
+    return state["current_question"].get("watch") or start_watch(now)
+
+
+def set_watch(state: InterviewState, watch: dict) -> InterviewState:
+    """Write an updated watch back onto the current question (ADR 0018)."""
+    return {**state, "current_question": {**state["current_question"], "watch": watch}}
+
+
 def _close_out_current_question(state: InterviewState) -> list[dict]:
     """Append the current question's result to `completed`.
 
@@ -192,12 +208,7 @@ def _close_out_current_question(state: InterviewState) -> list[dict]:
     if "submission" in question:
         record["submission"] = question["submission"]
     if "watch" in question:
-        record["watch"] = {
-            "interjections": question["watch"]["interjections"],
-            "hints": question["watch"]["hints"],
-            "chats": question["watch"]["chats"],
-            "runs": question["watch"]["runs"],
-        }
+        record["watch"] = tally(question["watch"])
     return [*state["completed"], record]
 
 

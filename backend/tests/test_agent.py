@@ -17,7 +17,7 @@ from app.providers import (
     ScriptedProvider,
 )
 from app.runner import RunResult, TestCaseResult
-from app.watcher import note_chat, note_interjection, note_run, start_watch
+from app.watcher import note_chat, note_interjection, observe_run, start_watch
 
 pytestmark = pytest.mark.anyio
 
@@ -391,7 +391,7 @@ async def test_completed_record_carries_the_watch_counts():
     state = _fast_forward_to_dsa(start_session("s1", "ml_genai", seed=1))
     watch = note_interjection(start_watch(now=0.0), now=100.0, action="hint")
     watch = note_interjection(watch, now=200.0, action="ask")
-    watch = note_run(note_chat(watch), passed=2, total=4)
+    watch = observe_run(note_chat(watch), passed=2, total=4)
     state = {**state, "current_question": {**state["current_question"], "watch": watch}}
     state = submit_code(state, "code", RunResult(status="ok", error=None, results=[]), "reaction")
 

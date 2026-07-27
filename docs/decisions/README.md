@@ -36,7 +36,7 @@ index that drifts from the ADRs is worse than no index.
 | [0015](0015-resume-grounded-warm-up.md) | Resume-grounded warm-up on a staged question queue | accepted |
 | [0016](0016-dsa-bank-and-sandboxed-runner.md) | DSA part 1 — extended bank + sandboxed runner | accepted |
 | [0017](0017-dsa-submit-flow.md) | DSA part 2 — submit, react, discuss through the graph | accepted |
-| [0018](0018-watching-interviewer-check-ins.md) | Watching interviewer part 1 — snapshots + check-in policy | accepted |
+| [0018](0018-watching-interviewer-check-ins.md) | Watching interviewer part 1 — snapshots + check-in policy | accepted · amended by [0027](0027-check-in-policy-owns-its-state.md) |
 | [0019](0019-voice-live-while-coding.md) | Watching interviewer part 2 — voice stays live while coding | accepted |
 | [0020](0020-dsa-round-scoring.md) | DSA-round scoring — measured facts, judged quality | accepted |
 | [0021](0021-session-store-interface.md) | Session store — the interface 0007 promised | accepted |
@@ -44,13 +44,13 @@ index that drifts from the ADRs is worse than no index.
 | [0024](0024-offline-question-generation.md) | Generate banks offline, gate by machine, review by hand | accepted |
 | [0025](0025-deploy-render-static-plus-api.md) | Deploy on Render as a static SPA plus a single API container | accepted |
 | [0026](0026-stt-resume-prompt.md) | Bias transcription with a résumé-derived vocabulary digest | accepted |
+| [0027](0027-check-in-policy-owns-its-state.md) | The check-in policy owns its own state | accepted · amends [0018](0018-watching-interviewer-check-ins.md) |
 
 ## Open — decided direction, not yet closed out
 
 | # | Title | Status | Where it stands |
 |---|---|---|---|
 | [0022](0022-weak-area-targeting.md) | Weak-area targeting | deferred | Deferred for v1: no users yet, value unproven, and it forces either the full accounts day (0009) or an identity model that contradicts it. Analysis kept; revisit when real usage demands it. |
-| [0027](0027-check-in-policy-owns-its-state.md) | The check-in policy owns its own state | proposed | Written, no code yet. Amends [0018](0018-watching-interviewer-check-ins.md): the policy it placed in `watcher.py` actually lives in `main.py`'s endpoint. Behaviour-preserving relocation; move to accepted when implemented. |
 
 ## Not yet ADRs — parked threads
 
