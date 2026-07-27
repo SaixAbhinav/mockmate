@@ -918,3 +918,46 @@ def test_chat_past_the_cap_gets_the_canned_redirect(client, monkeypatch):
     assert capped.status_code == 200
     assert capped.json()["reply"] == CHAT_CAP_REMARK
     assert capped.json()["dsa"]  # still on the question, still not advanced
+
+
+def _chat(client, session_id, utterance="Can the input be empty?"):
+    return client.post(f"/api/session/{session_id}/answer", json={"transcript": utterance})
+
+
+def test_a_chat_reply_silences_the_watcher_for_the_cooldown(client, monkeypatch):
+    """ADR 0028: the Interviewer must not answer the Candidate and then
+    interject unprompted seconds later."""
+    session_id, clock, watcher = _watching_session(client, monkeypatch)
+    _snapshot(client, session_id, EDITED_CODE)  # starts the watcher's clock
+    clock.advance(CHECK_IN_INTERVAL_SECONDS)  # a look is now due by the interval
+
+    _chat(client, session_id)
+
+    resp = _check_in(client, session_id)
+    assert resp.json()["action"] == "silent"
+    assert watcher.watch_calls == 0  # the gate closed before any LLM look
+
+    # ...and it is only the cooldown holding it back.
+    clock.advance(INTERJECTION_COOLDOWN_SECONDS)
+    assert _check_in(client, session_id).json()["action"] == "hint"
+
+
+def test_the_capped_redirect_also_silences_the_watcher(client, monkeypatch):
+    """The canned redirect is still the Interviewer speaking (ADR 0028) - and
+    it is the one chat path that records nothing else about the exchange."""
+    session_id, clock, watcher = _watching_session(client, monkeypatch)
+    _snapshot(client, session_id, EDITED_CODE)
+    for _ in range(MAX_CHATS_PER_QUESTION):
+        _chat(client, session_id, "thinking aloud")
+    # Let those replies' cooldown lapse, so only the capped one can be at fault.
+    clock.advance(INTERJECTION_COOLDOWN_SECONDS)
+
+    capped = _chat(client, session_id, "one more thing")
+
+    assert capped.json()["reply"] == CHAT_CAP_REMARK
+    resp = _check_in(client, session_id)
+    assert resp.json()["action"] == "silent"
+    assert watcher.watch_calls == 0
+
+    clock.advance(INTERJECTION_COOLDOWN_SECONDS)
+    assert _check_in(client, session_id).json()["action"] == "hint"

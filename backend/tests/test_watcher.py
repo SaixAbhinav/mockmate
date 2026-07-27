@@ -15,6 +15,7 @@ from app.watcher import (
     note_chat,
     note_check_in,
     note_interjection,
+    note_reply,
     observe_run,
     observe_snapshot,
     offer_due,
@@ -143,6 +144,28 @@ def test_note_chat_counts_exchanges():
     watch = note_chat(note_chat(start_watch(now=1000.0)))
 
     assert watch["chats"] == 2
+
+
+def test_a_reply_starts_the_interjection_cooldown():
+    # The Interviewer has just answered the Candidate, so the Watcher must not
+    # follow it seconds later with an unprompted remark (ADR 0028).
+    watch = observe_snapshot(start_watch(now=1000.0), STARTER + "x", now=1030.0)
+    due = 1030.0 + CHECK_IN_INTERVAL_SECONDS
+    assert check_in_due(watch, due) is True  # the look would otherwise be due
+
+    watch = note_reply(watch, due)
+
+    assert check_in_due(watch, due + 1.0) is False
+    assert check_in_due(watch, due + INTERJECTION_COOLDOWN_SECONDS) is True
+
+
+def test_a_reply_is_not_an_interjection():
+    # The Candidate asked for it, so it costs nothing from the cap that bounds
+    # *unprompted* remarks - otherwise a talkative Candidate would spend the
+    # Watcher's three interjections without it ever choosing to speak (ADR 0028).
+    watch = note_reply(start_watch(now=1000.0), 1010.0)
+
+    assert (watch["interjections"], watch["hints"]) == (0, 0)
 
 
 def test_describe_runs_reads_naturally():
