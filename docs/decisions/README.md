@@ -50,6 +50,7 @@ index that drifts from the ADRs is worse than no index.
 | # | Title | Status | Where it stands |
 |---|---|---|---|
 | [0022](0022-weak-area-targeting.md) | Weak-area targeting | deferred | Deferred for v1: no users yet, value unproven, and it forces either the full accounts day (0009) or an identity model that contradicts it. Analysis kept; revisit when real usage demands it. |
+| [0027](0027-check-in-policy-owns-its-state.md) | The check-in policy owns its own state | proposed | Written, no code yet. Amends [0018](0018-watching-interviewer-check-ins.md): the policy it placed in `watcher.py` actually lives in `main.py`'s endpoint. Behaviour-preserving relocation; move to accepted when implemented. |
 
 ## Not yet ADRs — parked threads
 
