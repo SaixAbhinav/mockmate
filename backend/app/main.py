@@ -27,14 +27,16 @@ from pydantic import BaseModel, Field
 from .agent import (
     InterviewState,
     build_graph,
+    current_watch,
     record_coding_chat,
     record_interjection,
+    set_watch,
     start_session,
     submit_answer,
     submit_code,
 )
 from .evaluator import build_evaluator_graph, evaluate_session
-from .providers import ProviderError, ProviderUnavailableError, WatchDecision, get_provider
+from .providers import ProviderError, ProviderUnavailableError, get_provider
 from .questions import FALLBACK_DOMAIN
 from .resume import ResumeError, extract_resume_text, vocabulary_digest
 from .runner import RunResult, run_tests, summarize_run
@@ -44,17 +46,10 @@ from .tts import DEFAULT_VOICE, VOICES, synthesize
 from .watcher import (
     CHAT_CAP_REMARK,
     MAX_CHATS_PER_QUESTION,
-    OFFER_REMARK,
-    check_in_due,
-    describe_runs,
-    is_stuck,
+    check_in,
     note_chat,
-    note_check_in,
-    note_interjection,
-    note_run,
-    offer_due,
-    record_snapshot,
-    start_watch,
+    observe_run,
+    observe_snapshot,
 )
 
 load_dotenv()
@@ -361,10 +356,6 @@ async def _current_dsa_question(session_id: str) -> tuple[InterviewState, dict]:
     return state, question
 
 
-def _store_watch(state: InterviewState, watch: dict) -> InterviewState:
-    return {**state, "current_question": {**state["current_question"], "watch": watch}}
-
-
 async def _unsubmitted_dsa_question(session_id: str) -> tuple[InterviewState, dict]:
     state, question = await _current_dsa_question(session_id)
     if "submission" in question:
@@ -376,7 +367,7 @@ async def _spoken_check_in(
     session_id: str, state: InterviewState, watch: dict, action: str, remark: str, voice: str
 ) -> CheckInResponse:
     """Deliver an interjection: transcript first, then audio (ADR 0018)."""
-    state = record_interjection(_store_watch(state, watch), remark)
+    state = record_interjection(set_watch(state, watch), remark)
     await get_store().save(state)
     audio = await synthesize(remark, voice)
     return CheckInResponse(
@@ -516,7 +507,7 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
         # Voice is live while coding (ADR 0019): a side conversation, not a
         # judged answer. The graph never runs, nothing advances, and the
         # Submission stays the only way past a coding question.
-        watch = current.get("watch") or start_watch(_now())
+        watch = current_watch(state, _now())
         code = watch["code"] if watch["code"] is not None else current["starter_code"]
         if watch["chats"] >= MAX_CHATS_PER_QUESTION:
             # The cap keeps chat from being the app's one unmetered LLM
@@ -537,7 +528,7 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
                     detail="the AI provider is temporarily unavailable — please try again",
                 ) from exc
             watch = note_chat(watch)
-        state = record_coding_chat(_store_watch(state, watch), req.transcript, reply)
+        state = record_coding_chat(set_watch(state, watch), req.transcript, reply)
         await store.save(state)
         audio = await synthesize(reply, req.voice)
         number, total = _progress(state)
@@ -592,12 +583,12 @@ async def dsa_run(session_id: str, req: DsaRunRequest) -> RunReport:
     if "submission" not in question:
         # Watcher telemetry, not interview movement (ADR 0018): the run stays
         # free iteration, but the watcher sees how it is going.
-        watch = note_run(
-            question.get("watch") or start_watch(_now()),
+        watch = observe_run(
+            current_watch(state, _now()),
             passed=report.passed,
             total=report.total,
         )
-        await get_store().save(_store_watch(state, watch))
+        await get_store().save(set_watch(state, watch))
     return report
 
 
@@ -647,10 +638,10 @@ async def dsa_snapshot(session_id: str, req: SnapshotRequest):
 
     Sent on typing pauses; no LLM, no interview movement. The first
     Snapshot starts the watcher's clock (ADR 0018)."""
-    state, question = await _unsubmitted_dsa_question(session_id)
+    state, _ = await _unsubmitted_dsa_question(session_id)
     now = _now()
-    watch = record_snapshot(question.get("watch") or start_watch(now), req.code, now)
-    await get_store().save(_store_watch(state, watch))
+    watch = observe_snapshot(current_watch(state, now), req.code, now)
+    await get_store().save(set_watch(state, watch))
     return {"received": True}
 
 
@@ -658,47 +649,25 @@ async def dsa_snapshot(session_id: str, req: SnapshotRequest):
 async def dsa_check_in(session_id: str, req: CheckInRequest) -> CheckInResponse:
     """The watching interviewer's look at the latest Snapshot (ADR 0018).
 
-    Polled by the frontend. The deterministic Offer fires first when due;
-    otherwise the server-side gates (typing-anchored interval, cooldown,
-    cap) decide when a poll becomes an LLM look. Cooldowns and provider
-    failures both answer silent - a poll never surfaces an error."""
+    Polled by the frontend; the policy itself lives in `watcher.check_in`
+    (ADR 0027). This endpoint supplies the clock and the Provider, stores
+    the watch the policy hands back, and speaks when it says to."""
     state, question = await _unsubmitted_dsa_question(session_id)
     now = _now()
-    watch = question.get("watch") or start_watch(now)
-
-    if offer_due(watch, now):
-        # Two minutes of silence needs no model to interpret (ADR 0018).
-        watch = note_check_in(watch, question["starter_code"], now)
-        watch = note_interjection(watch, now, action="offer")
-        return await _spoken_check_in(session_id, state, watch, "offer", OFFER_REMARK, req.voice)
-
-    if not check_in_due(watch, now):
-        await get_store().save(_store_watch(state, watch))  # persists a fresh watch
-        return CheckInResponse(action="silent")
-
-    code = watch["code"] if watch["code"] is not None else question["starter_code"]
-    stuck = is_stuck(watch, question["starter_code"])
-    try:
-        decision = await get_provider().watch_code(
-            question=question["question"],
-            code=code,
-            stuck=stuck,
-            seconds_elapsed=now - watch["started_at"],
-            runs_summary=describe_runs(watch),
-        )
-    except ProviderError as exc:
-        # A watcher that can't think stays quiet (ADR 0018). Never log the code.
-        logger.warning("check-in failed for session %s: %s", session_id, type(exc).__name__)
-        decision = WatchDecision(action="silent", remark="")
-
-    # The look is recorded even on failure, so a failing provider is not
-    # hammered again on the next poll.
-    watch = note_check_in(watch, code, now)
+    watch, decision = await check_in(
+        current_watch(state, now),
+        question_text=question["question"],
+        starter_code=question["starter_code"],
+        now=now,
+        provider=get_provider(),
+    )
+    if decision.failure is not None:
+        # Check-ins fail silent by design, so this line is the only trace a
+        # Provider is failing - it belongs where the Session id is (ADR 0027).
+        logger.warning("check-in failed for session %s: %s", session_id, decision.failure)
     if decision.action == "silent":
-        await get_store().save(_store_watch(state, watch))
+        await get_store().save(set_watch(state, watch))  # persists a fresh watch
         return CheckInResponse(action="silent")
-
-    watch = note_interjection(watch, now, decision.action)
     return await _spoken_check_in(
         session_id, state, watch, decision.action, decision.remark, req.voice
     )
