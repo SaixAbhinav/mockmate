@@ -37,7 +37,7 @@ index that drifts from the ADRs is worse than no index.
 | [0016](0016-dsa-bank-and-sandboxed-runner.md) | DSA part 1 — extended bank + sandboxed runner | accepted |
 | [0017](0017-dsa-submit-flow.md) | DSA part 2 — submit, react, discuss through the graph | accepted |
 | [0018](0018-watching-interviewer-check-ins.md) | Watching interviewer part 1 — snapshots + check-in policy | accepted · amended by [0027](0027-check-in-policy-owns-its-state.md) |
-| [0019](0019-voice-live-while-coding.md) | Watching interviewer part 2 — voice stays live while coding | accepted |
+| [0019](0019-voice-live-while-coding.md) | Watching interviewer part 2 — voice stays live while coding | accepted · amended by [0028](0028-a-reply-starts-the-watcher-cooldown.md) |
 | [0020](0020-dsa-round-scoring.md) | DSA-round scoring — measured facts, judged quality | accepted |
 | [0021](0021-session-store-interface.md) | Session store — the interface 0007 promised | accepted |
 | [0023](0023-resume-driven-domain.md) | The résumé decides the domain | accepted |
@@ -45,6 +45,7 @@ index that drifts from the ADRs is worse than no index.
 | [0025](0025-deploy-render-static-plus-api.md) | Deploy on Render as a static SPA plus a single API container | accepted |
 | [0026](0026-stt-resume-prompt.md) | Bias transcription with a résumé-derived vocabulary digest | accepted |
 | [0027](0027-check-in-policy-owns-its-state.md) | The check-in policy owns its own state | accepted · amends [0018](0018-watching-interviewer-check-ins.md) |
+| [0028](0028-a-reply-starts-the-watcher-cooldown.md) | A chat reply starts the Watcher's cooldown | accepted · amends [0019](0019-voice-live-while-coding.md) |
 
 ## Open — decided direction, not yet closed out
 

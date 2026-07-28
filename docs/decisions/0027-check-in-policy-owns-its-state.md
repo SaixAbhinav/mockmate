@@ -164,6 +164,9 @@ end-to-end coverage is what proves it.
 
 ## Deliberately not fixed here: chat does not start the interjection cooldown
 
+> **Since fixed by [ADR 0028](0028-a-reply-starts-the-watcher-cooldown.md)**, in
+> its own change, as this section argued it should be.
+
 Found while writing this ADR, recorded so it is not lost. `note_chat` increments
 `chats` and touches nothing else; `check_in_due` gates on `last_spoke_at`, which
 only `note_interjection` sets. So a spoken chat reply (ADR 0019) does **not**

@@ -48,6 +48,7 @@ from .watcher import (
     MAX_CHATS_PER_QUESTION,
     check_in,
     note_chat,
+    note_reply,
     observe_run,
     observe_snapshot,
 )
@@ -528,6 +529,11 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
                     detail="the AI provider is temporarily unavailable — please try again",
                 ) from exc
             watch = note_chat(watch)
+        # Both branches speak, so both start the watcher's cooldown (ADR 0028):
+        # the canned redirect is still the Interviewer talking. Stamped here
+        # rather than at the top of the turn because the LLM call sits in
+        # between, and the cooldown runs from when the Candidate is spoken to.
+        watch = note_reply(watch, _now())
         state = record_coding_chat(set_watch(state, watch), req.transcript, reply)
         await store.save(state)
         audio = await synthesize(reply, req.voice)

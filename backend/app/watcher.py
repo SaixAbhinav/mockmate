@@ -148,6 +148,17 @@ def note_chat(watch: dict) -> dict:
     return {**watch, "chats": watch["chats"] + 1}
 
 
+def note_reply(watch: dict, now: float) -> dict:
+    """The Interviewer answered the Candidate mid-coding (ADR 0019/0028).
+
+    Not an Interjection - the Candidate asked, so it costs nothing from the
+    cap that bounds *unprompted* remarks and counts as no Hint. It starts
+    the same cooldown, though: whoever just spoke, the Interviewer talking
+    twice in a row is the hovering ADR 0018 exists to prevent.
+    """
+    return {**watch, "last_spoke_at": now}
+
+
 def describe_runs(watch: dict) -> str:
     """The run summary for the watch prompt - what a real interviewer
     perceives: are they getting anywhere?"""
