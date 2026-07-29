@@ -37,3 +37,17 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+
+# --- Terraform (infra/, ADR 0029) ---
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+# infra/.terraform.lock.hcl is intentionally NOT ignored — it is committed.
