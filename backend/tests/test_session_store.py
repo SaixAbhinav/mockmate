@@ -222,3 +222,38 @@ async def test_get_store_is_a_singleton():
     from app.session_store import get_store
 
     assert get_store() is get_store()
+
+
+@pytest.fixture
+def clean_dynamodb_singleton():
+    """Isolates the `SESSION_STORE=dynamodb` branch of `get_store()`.
+
+    `_dynamodb_store` is a module-level singleton, same as `_store` - so a
+    test that flips it on must reset it afterwards, or a later test in the
+    same process (e.g. `test_get_store_defaults_to_in_memory`) could
+    observe a leftover instance instead of exercising a fresh `get_store()`
+    call. `_get_table()` is lazy (per the brief), so constructing the store
+    here never touches AWS/moto - no table or region setup is needed.
+    """
+    import app.session_store as session_store_module
+
+    yield session_store_module
+    session_store_module._dynamodb_store = None
+
+
+async def test_get_store_returns_dynamodb_store_when_env_selects_it(
+    monkeypatch, clean_dynamodb_singleton
+):
+    monkeypatch.setenv("SESSION_STORE", "dynamodb")
+
+    store = clean_dynamodb_singleton.get_store()
+
+    assert isinstance(store, DynamoDBSessionStore)
+
+
+async def test_get_store_dynamodb_path_is_also_a_singleton(
+    monkeypatch, clean_dynamodb_singleton
+):
+    monkeypatch.setenv("SESSION_STORE", "dynamodb")
+
+    assert clean_dynamodb_singleton.get_store() is clean_dynamodb_singleton.get_store()
