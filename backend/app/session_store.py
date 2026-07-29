@@ -11,14 +11,13 @@ claim/release pair that decides who gets to compute a Session's Evaluation.
 see ADR 0021.
 
 ADR 0029 moves the app to serverless AWS, where a single in-process
-`asyncio.Lock` (`_evaluation_locks` in `main.py`) no longer coordinates
-callers across Lambda containers — two containers can each believe they are
-the first to compute a given Session's Evaluation ("Race A"). `claim_evaluation`
-/ `release_evaluation_claim` are the storage-backed replacement: whichever
-backend is active, exactly one caller's claim succeeds. `main.py` still uses
-`_evaluation_locks` today — rewiring the endpoint to these methods instead is
-a separate follow-up PR; this one only adds the primitive and proves it on
-both backends.
+`asyncio.Lock` (formerly `_evaluation_locks` in `main.py`) no longer
+coordinates callers across Lambda containers — two containers can each
+believe they are the first to compute a given Session's Evaluation
+("Race A"). `claim_evaluation` / `release_evaluation_claim` are the
+storage-backed replacement: whichever backend is active, exactly one
+caller's claim succeeds; the loser polls for the winner's saved Evaluation
+(see `_await_evaluation` in `main.py`) instead of recomputing.
 """
 
 import asyncio
