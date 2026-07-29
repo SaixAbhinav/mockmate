@@ -52,6 +52,7 @@ index that drifts from the ADRs is worse than no index.
 | # | Title | Status | Where it stands |
 |---|---|---|---|
 | [0022](0022-weak-area-targeting.md) | Weak-area targeting | deferred | Deferred for v1: no users yet, value unproven, and it forces either the full accounts day (0009) or an identity model that contradicts it. Analysis kept; revisit when real usage demands it. |
+| [0029](0029-serverless-aws-deploy.md) | Serverless AWS deploy — Terraform IaC and idempotent state at scale | accepted · building (5 PRs) | Serverless AWS deploy defined in Terraform with an OIDC CI/CD pipeline, optimised for demonstrable cloud competence within a near-free (~$0/mo) bound rather than for cost alone: CloudFront → {S3, API Gateway HTTP API} → Lambda (FastAPI via Web Adapter) → DynamoDB. Headline features: everything in Terraform, and replacing the in-process `_evaluation_locks` with a DynamoDB conditional write so evaluation is idempotent under horizontal scale (Race A). Watcher-poll last-writer-wins (Race B) is deliberately deferred. Shipping backend-state PR first. Supersedes [0025](0025-deploy-render-static-plus-api.md)'s host on cutover (PR 3). |
 
 ## Not yet ADRs — parked threads
 
