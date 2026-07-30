@@ -347,6 +347,31 @@ def test_evaluation_with_retryable_failure_is_not_cached(client, monkeypatch):
     assert len(calls) == 2  # not cached — evaluate_session ran on both requests
 
 
+def test_evaluation_poll_timeout_returns_503(client, monkeypatch):
+    # A loser that never sees the winner's saved Evaluation within the bounded
+    # wait (e.g. the winner released without saving) must not hang forever —
+    # it reports 503 so the caller retries (ADR 0029, loser policy).
+    from app import main as main_module
+
+    session_id = _finish_session(client)
+    monkeypatch.setenv("MOCKMATE_EVAL_WAIT_SECONDS", "0.2")
+
+    store = main_module.get_store()
+
+    async def never_claims(session_id):
+        return False  # every request believes someone else is computing
+
+    async def never_ready(session_id):
+        return None  # ...and that someone never saves a result
+
+    monkeypatch.setattr(store, "claim_evaluation", never_claims)
+    monkeypatch.setattr(store, "get_evaluation", never_ready)
+
+    resp = client.get(f"/api/session/{session_id}/evaluation")
+
+    assert resp.status_code == 503
+
+
 # Comfortably over the 200-char floor; contains "LangGraph" for the grounding assert.
 SAMPLE_RESUME = (
     b"I built MockMate, a voice-based mock interviewer, using LangGraph "

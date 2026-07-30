@@ -111,11 +111,6 @@ app.add_middleware(
 
 # Sessions and Evaluations live behind `SessionStore` (ADR 0007, ADR 0021).
 
-# One lock per Session. The cache check straddles an await, so without this two
-# concurrent requests both miss and both score. React's <StrictMode> makes that a
-# certainty in dev, not a theoretical race.
-_evaluation_locks: dict[str, asyncio.Lock] = {}
-
 # Uploaded resumes, reduced to capped plain text (ADR 0015). In-memory like
 # everything else (ADR 0007): anonymous, dies with the process. PII - never log.
 _resumes: dict[str, str] = {}
@@ -684,6 +679,23 @@ async def dsa_check_in(session_id: str, req: CheckInRequest) -> CheckInResponse:
     )
 
 
+async def _await_evaluation(store, session_id: str) -> dict | None:
+    """Poll for the winning request's saved Evaluation (ADR 0029 loser policy:
+    a request that loses `claim_evaluation` waits for the winner instead of
+    recomputing). Returns the Evaluation, or None if it does not appear within
+    the bounded wait (e.g. the winner hit a retryable failure and released
+    without saving)."""
+    wait_seconds = float(os.getenv("MOCKMATE_EVAL_WAIT_SECONDS", "30.0"))
+    deadline = asyncio.get_event_loop().time() + wait_seconds
+    while True:
+        result = await store.get_evaluation(session_id)
+        if result is not None:
+            return result
+        if asyncio.get_event_loop().time() >= deadline:
+            return None
+        await asyncio.sleep(0.1)
+
+
 @app.get("/api/session/{session_id}/evaluation", response_model=EvaluationResponse)
 async def evaluation(session_id: str) -> EvaluationResponse:
     # Evaluations are cached per Session: the Evaluation is stable once a Session
@@ -695,19 +707,34 @@ async def evaluation(session_id: str) -> EvaluationResponse:
     if state["phase"] != "done":
         raise HTTPException(status_code=409, detail="the Session is not finished yet")
 
-    # setdefault does not await, so it is atomic on the event loop.
-    lock = _evaluation_locks.setdefault(session_id, asyncio.Lock())
-    async with lock:
-        result = await store.get_evaluation(session_id)
-        if result is None:
-            graph = build_evaluator_graph(get_provider())
-            result = await evaluate_session(
-                graph, session_id, state["domain"], state["completed"]
-            )
+    # `claim_evaluation` (ADR 0029, Race A) replaces the in-process
+    # `_evaluation_locks`: it is the storage-backed guard that still works
+    # across Lambda containers, where a plain `asyncio.Lock` cannot coordinate.
+    result = await store.get_evaluation(session_id)  # fast path: already cached
+    if result is None:
+        if await store.claim_evaluation(session_id):  # we won the claim - compute
+            try:
+                graph = build_evaluator_graph(get_provider())
+                result = await evaluate_session(
+                    graph, session_id, state["domain"], state["completed"]
+                )
+            except BaseException:
+                # Unexpected failure: release the claim so a later request can
+                # retry, then propagate - swallowing it would wedge the Session.
+                await store.release_evaluation_claim(session_id)
+                raise
             # A transient provider failure (rate limit, timeout) should not be
             # baked in forever — only cache once every Score/Assessment call
             # either succeeded or failed deterministically (malformed).
-            if not result["retryable_failure"]:
+            if result["retryable_failure"]:
+                await store.release_evaluation_claim(session_id)
+            else:
                 await store.save_evaluation(session_id, result)
+        else:  # we lost the claim - the winner is computing, so wait for it
+            result = await _await_evaluation(store, session_id)
+            if result is None:
+                raise HTTPException(
+                    status_code=503, detail="evaluation still in progress, please retry"
+                )
 
     return EvaluationResponse(**{k: v for k, v in result.items() if k != "retryable_failure"})
