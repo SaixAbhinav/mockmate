@@ -105,11 +105,20 @@ update) the function that references it.**
 Run these in order, from the repo root unless noted:
 
 1. **Build the image** (Dockerfile lives at the repo root and `COPY`s
-   `backend/`, so build from there):
+   `backend/`, so build from there). Use `--provenance=false` and pin
+   `--platform linux/amd64`:
 
    ```bash
-   docker build -t mockmate .
+   docker buildx build --provenance=false --platform linux/amd64 -t mockmate:latest --load .
    ```
+
+   > **Why not a plain `docker build`?** Modern Docker (BuildKit) attaches
+   > provenance/SBOM attestations by default, which pushes an OCI *image index*
+   > that AWS Lambda rejects with `InvalidParameterValueException: The image
+   > manifest, config or layer media type ... is not supported`.
+   > `--provenance=false` pushes a single-arch image manifest Lambda accepts;
+   > `--platform linux/amd64` matches the function's `architectures = ["x86_64"]`.
+   > The PR 4 CI build must pass the same flags.
 
 2. **Log in to ECR** (credentials from your AWS profile; region/account are
    fixed for this project):
