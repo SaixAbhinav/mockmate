@@ -36,3 +36,21 @@ output "api_endpoint" {
   description = "Invoke URL of the HTTP API's $default stage - the backend's public base URL. Append /api/health for a smoke test."
   value       = aws_apigatewayv2_api.http.api_endpoint
 }
+
+# PR 3's outputs - the frontend deploy runbook (README.md) consumes these:
+# the bucket name to `aws s3 sync` into, the domain to visit, and the
+# distribution id to invalidate after each new build.
+output "frontend_bucket_name" {
+  description = "S3 bucket name for the built SPA - sync `frontend/dist` here (see README's deploy runbook)."
+  value       = aws_s3_bucket.frontend.bucket
+}
+
+output "cloudfront_domain" {
+  description = "CloudFront distribution domain name - the URL to visit. Single origin: '/' serves the SPA from S3, '/api/*' forwards to the API Gateway HTTP API above, so there is no production CORS."
+  value       = aws_cloudfront_distribution.frontend.domain_name
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution id - pass to `aws cloudfront create-invalidation --distribution-id <this> --paths \"/*\"` after each frontend redeploy."
+  value       = aws_cloudfront_distribution.frontend.id
+}

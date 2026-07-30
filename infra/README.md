@@ -1,4 +1,4 @@
-# infra/ — Terraform (ADR 0029, PR 2a + PR 2b)
+# infra/ — Terraform (ADR 0029, PR 2a + PR 2b + PR 3)
 
 Terraform for the serverless AWS deploy. PR 2a laid the foundation: the
 DynamoDB session table (`dynamodb.tf`), the ECR repository (`ecr.tf`), the
@@ -7,8 +7,11 @@ Lambda execution IAM role (`iam.tf`), and the two SSM secret parameters
 built container image. PR 2b adds the compute that does: the Lambda
 function (`lambda.tf`) and the API Gateway HTTP API in front of it
 (`apigateway.tf`), both referencing PR 2a's resources rather than
-duplicating them. Everything in this directory is `apply`-able together as
-one unit.
+duplicating them. PR 3 adds the frontend: a private S3 bucket
+(`s3_frontend.tf`) and a CloudFront distribution (`cloudfront.tf`) that is
+the single origin the browser talks to - `/` serves the SPA from S3,
+`/api/*` forwards to PR 2b's API Gateway. Everything in this directory is
+`apply`-able together as one unit.
 
 See [ADR 0029](../docs/decisions/0029-serverless-aws-deploy.md) for the full
 design rationale.
@@ -175,3 +178,80 @@ The frontend's retry (or the losing request's poll) then reads the cached
 Evaluation quickly. This is ADR 0029's "Race A" and is by design - don't
 try to "fix" it by raising API Gateway's timeout further; it can't go past
 its own cap.
+
+## Deploying the frontend (PR 3: S3 + CloudFront)
+
+`s3_frontend.tf` and `cloudfront.tf` put the built React SPA behind
+CloudFront, with CloudFront also fronting PR 2b's API Gateway at `/api/*`.
+This makes CloudFront the app's **single origin**: the browser only ever
+talks to the CloudFront domain, so the frontend's relative `/api/...` calls
+(`frontend/src/api.js`) keep working unchanged and there is **no production
+CORS** - the same property ADR 0025's Render rewrite held, preserved across
+the AWS cutover. There is no frontend code change in this PR:
+`VITE_API_BASE` stays unset, exactly like local dev (Vite's own `/api`
+proxy in `vite.config.js`).
+
+The S3 bucket is private - it has no website hosting, no public ACLs, and
+its bucket policy only allows the CloudFront service principal, scoped by
+`AWS:SourceArn` to this one distribution (Origin Access Control). There is
+no path that reaches the bucket except through CloudFront.
+
+Run these in order, from the repo root unless noted:
+
+1. **Apply the Terraform** - creates the S3 bucket and the CloudFront
+   distribution. `wait_for_deployment` defaults to `true`, so `apply` blocks
+   until the distribution reaches `Deployed` status - expect this step to take
+   a few minutes on first apply. (`-chdir=infra` so every step in this section
+   runs from the repo root):
+
+   ```bash
+   terraform -chdir=infra apply
+   ```
+
+2. **Build the SPA**:
+
+   ```bash
+   npm --prefix frontend install
+   npm --prefix frontend run build
+   ```
+
+   Outputs to `frontend/dist`.
+
+3. **Upload the build to S3**, using the `frontend_bucket_name` output:
+
+   ```bash
+   aws s3 sync frontend/dist "s3://$(terraform -chdir=infra output -raw frontend_bucket_name)" --delete
+   ```
+
+4. **Invalidate the CloudFront cache** so the new build is visible
+   immediately instead of waiting out the cache policy's TTL, using the
+   `cloudfront_distribution_id` output:
+
+   ```bash
+   aws cloudfront create-invalidation \
+     --distribution-id "$(terraform -chdir=infra output -raw cloudfront_distribution_id)" \
+     --paths "/*"
+   ```
+
+5. **Visit the site**, using the `cloudfront_domain` output:
+
+   ```bash
+   echo "https://$(terraform -chdir=infra output -raw cloudfront_domain)"
+   ```
+
+   The SPA loads from S3, and its `/api/*` calls hit the Lambda through the
+   same origin - no CORS involved, matching local dev.
+
+### Redeploying the frontend after a code change
+
+Steps 2-4 above, in order: **rebuild → `s3 sync` → invalidate**. No
+`terraform apply` is needed unless the CloudFront/S3 config itself changed.
+PR 4 automates this sequence as CI.
+
+### Cutover note
+
+Once this distribution is live and the frontend uploaded, the AWS deploy
+supersedes [ADR 0025](../docs/decisions/0025-deploy-render-static-plus-api.md)'s
+Render host, per ADR 0029's status section. Updating that ADR's (and the
+decisions index's) status to reflect the supersession is PR 5's docs step,
+not this one.
