@@ -1,4 +1,4 @@
-# infra/ — Terraform (ADR 0029, PR 2a + PR 2b + PR 3)
+# infra/ — Terraform (ADR 0029, PR 2a + PR 2b + PR 3 + PR 5)
 
 Terraform for the serverless AWS deploy. PR 2a laid the foundation: the
 DynamoDB session table (`dynamodb.tf`), the ECR repository (`ecr.tf`), the
@@ -10,8 +10,10 @@ function (`lambda.tf`) and the API Gateway HTTP API in front of it
 duplicating them. PR 3 adds the frontend: a private S3 bucket
 (`s3_frontend.tf`) and a CloudFront distribution (`cloudfront.tf`) that is
 the single origin the browser talks to - `/` serves the SPA from S3,
-`/api/*` forwards to PR 2b's API Gateway. Everything in this directory is
-`apply`-able together as one unit.
+`/api/*` forwards to PR 2b's API Gateway. PR 5 adds monitoring
+(`cloudwatch.tf`): an SNS alerts topic, one dashboard, and five alarms
+across all of the above, staying inside the free tier. Everything in this
+directory is `apply`-able together as one unit.
 
 See [ADR 0029](../docs/decisions/0029-serverless-aws-deploy.md) for the full
 design rationale.
@@ -255,3 +257,58 @@ supersedes [ADR 0025](../docs/decisions/0025-deploy-render-static-plus-api.md)'s
 Render host, per ADR 0029's status section. Updating that ADR's (and the
 decisions index's) status to reflect the supersession is PR 5's docs step,
 not this one.
+
+## Monitoring (PR 5)
+
+`cloudwatch.tf` adds one SNS topic, one dashboard, and five alarms - all
+inside ADR 0029's near-free bound (1 of 3 free dashboards, 5 of 10 free
+alarms).
+
+### Dashboard
+
+`terraform output cloudwatch_dashboard_url` prints the console link
+directly (constructed from the dashboard's own name, not hard-coded). It
+shows four rows, two widgets each:
+
+- **Lambda** - Invocations/Errors/Throttles, and Duration (avg + p99).
+- **API Gateway** - Count/4xx/5xx, and Latency (avg).
+- **DynamoDB** - Consumed read/write capacity, and read/write throttle events.
+- **CloudFront** - Requests, and 4xx/5xx error rate.
+
+### Alarms
+
+All five notify the same SNS topic (`sns_alerts_topic_arn` output) on both
+`ALARM` and `OK`, with `treat_missing_data = "notBreaching"` so a quiet
+period never itself pages anyone:
+
+| Alarm | Fires when |
+|---|---|
+| `mockmate-lambda-errors` | Lambda `Errors` sum > 0 in two consecutive 5-minute periods |
+| `mockmate-lambda-throttles` | Lambda `Throttles` sum > 0 in two consecutive 5-minute periods |
+| `mockmate-lambda-duration-p99` | Lambda `Duration` p99 > 55s (5s inside the 60s function timeout - see `lambda.tf`) |
+| `mockmate-apigateway-5xx` | API Gateway `5xx` sum > 5 in a 5-minute period |
+| `mockmate-dynamodb-throttles` | DynamoDB `ReadThrottleEvents + WriteThrottleEvents` (metric math, one alarm for both) > 0 in a 5-minute period |
+
+### Opting in to email alerts (one-time, out-of-band)
+
+Terraform deliberately creates **no** `aws_sns_topic_subscription` - an
+email subscription sits `PENDING` until a human clicks the confirmation
+link AWS sends, which isn't something `apply` can do for you. Subscribe
+once, after `apply`:
+
+```bash
+aws sns subscribe \
+  --topic-arn "$(terraform output -raw sns_alerts_topic_arn)" \
+  --protocol email \
+  --notification-endpoint you@example.com
+```
+
+Then click the confirmation link in the email AWS sends. Until confirmed,
+the subscription stays `PendingConfirmation` and alarms notify no one.
+
+### Staying inside the free tier
+
+One dashboard (3 free), five alarms (10 free), one SNS topic and email
+subscription (both free), and the CloudWatch metrics themselves (all
+listed here are standard, not the paid detailed/high-resolution kind).
+Nothing in this file changes ADR 0029's ~$0/month bound.
