@@ -14,6 +14,7 @@ export function useRecorder({ sessionId, setStatus, onError, onTranscript }) {
   const recorderRef = useRef(null)
 
   async function startRecording() {
+    onError(null)
     let stream
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true })

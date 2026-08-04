@@ -14,6 +14,11 @@ function setup({ peak }) {
   return { mocks, onTranscript, onError, setStatus, result }
 }
 
+// startRecording clears any stale banner first, so the message is the last
+// non-null call, not the first.
+const lastError = (onError) =>
+  onError.mock.calls.map((c) => c[0]).filter(Boolean).at(-1)
+
 describe('useRecorder', () => {
   beforeEach(() => vi.useRealTimers())
 
@@ -28,7 +33,7 @@ describe('useRecorder', () => {
       result.current.stopRecording()
     })
     await waitFor(() => expect(onError).toHaveBeenCalled())
-    expect(onError.mock.calls[0][0]).toMatch(/didn't catch that/i)
+    expect(lastError(onError)).toMatch(/didn't catch that/i)
     expect(onTranscript).not.toHaveBeenCalled()
   })
 
@@ -41,7 +46,7 @@ describe('useRecorder', () => {
       result.current.stopRecording()
     })
     await waitFor(() => expect(onError).toHaveBeenCalled())
-    expect(onError.mock.calls[0][0]).toMatch(/too short/i)
+    expect(lastError(onError)).toMatch(/too short/i)
     expect(onTranscript).not.toHaveBeenCalled()
   })
 
@@ -66,7 +71,7 @@ describe('useRecorder', () => {
     await act(async () => {
       await result.current.startRecording()
     })
-    expect(onError.mock.calls[0][0]).toMatch(/microphone permission denied/i)
+    expect(lastError(onError)).toMatch(/microphone permission denied/i)
     expect(setStatus).not.toHaveBeenCalledWith('recording')
   })
 })
