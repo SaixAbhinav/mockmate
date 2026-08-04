@@ -119,10 +119,18 @@ textarea {
   color: var(--text);
 }
 
+/* A visible focus ring, not just a border shift: the border-only version was
+   invisible against --surface and failed WCAG 2.4.7. Monochrome and flat, so
+   it stays inside the design constraints (ADR 0030). */
+:where(input, select, textarea, button, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+  border-radius: var(--r);
+}
+
 input:focus,
 select:focus,
 textarea:focus {
-  outline: none;
   border-color: var(--border-strong);
 }
 
