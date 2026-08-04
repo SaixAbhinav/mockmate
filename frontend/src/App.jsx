@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import CodeMirror from '@uiw/react-codemirror'
-import { python } from '@codemirror/lang-python'
 import { api } from './api'
 import { playAudio } from './lib/audio'
-import { ScoreRow } from './components/ScoreRow'
 import { ErrorBanner } from './components/ErrorBanner'
 import { Transcript } from './components/Transcript'
 import { Composer } from './components/Composer'
+import { StartScreen } from './components/StartScreen'
+import { CodingWorkspace } from './components/CodingWorkspace'
+import { Evaluation } from './components/Evaluation'
 import './App.css'
-import heroArt from './assets/hero-art.png'
 import mark from './assets/mark.svg'
 
 // The watching interviewer (ADR 0018): snapshot on a typing pause; poll for
@@ -451,97 +450,19 @@ function App() {
 
   if (screen === 'start') {
     return (
-      <main className="wrap">
-        <header className="topbar">
-          <div className="brand">
-            <span className="brand-name">Callback</span>
-            <img className="brand-mark" src={mark} alt="" aria-hidden="true" />
-            <span className="brand-tag">voice interview practice, in the open</span>
-          </div>
-        </header>
-
-        <ErrorBanner error={error} onDismiss={() => setError(null)} />
-
-        <div className="landing">
-          <section className="hero">
-            <img className="hero-art" src={heroArt} alt="" aria-hidden="true" />
-            <div className="hero-body">
-              <p className="kicker">Open source · self-hostable</p>
-              <h1>Sit the interview before it counts.</h1>
-              <p className="lede">
-                Upload a résumé and Callback builds an interview around it — an intro, a
-                résumé-grounded warm-up, then two sandboxed Python questions with an
-                interviewer watching as you type. You leave with a scored evaluation.
-              </p>
-            </div>
-          </section>
-
-          <ol className="landing-steps">
-            <li>Upload a résumé — optional, skip it for a general ML/GenAI interview</li>
-            <li>Answer out loud; the interviewer probes what you say</li>
-            <li>Solve two coding questions, then read your scored evaluation</li>
-          </ol>
-
-          <p className="hint">
-            Built in the open —{' '}
-            <a href="https://github.com/SaixAbhinav/mockmate" target="_blank" rel="noreferrer">
-              source and architecture decisions on GitHub
-            </a>
-            .
-          </p>
-        </div>
-
-        <section className="start-panel">
-          <label className="resume-drop">
-            <strong>{resumeName || 'Choose a résumé'}</strong>
-            <span className="hint">
-              {resumeStatus === 'uploading'
-                ? 'Uploading…'
-                : resumeStatus === 'ready'
-                  ? 'Your interview will be built around this file'
-                  : resumeStatus === 'failed'
-                    ? 'That file could not be read — try another, or skip for a general ML/GenAI interview.'
-                    : 'PDF or .txt — or skip for a general ML/GenAI interview'}
-            </span>
-            <input type="file" accept=".pdf,.txt" onChange={handleResumeChange} />
-          </label>
-
-          {fallbackOffer ? (
-            <div className="fallback-offer">
-              <p>{fallbackOffer.message}</p>
-              <div className="dsa-actions">
-                <button onClick={() => startInterview(true)} disabled={status === 'thinking'}>
-                  Start the general interview
-                </button>
-                <button
-                  className="secondary"
-                  onClick={() => setFallbackOffer(null)}
-                  disabled={status === 'thinking'}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => startInterview(false)}
-              disabled={status === 'thinking' || resumeStatus === 'uploading'}
-            >
-              {status === 'thinking'
-                ? (resumeId ? 'Reading your résumé…' : 'Starting…')
-                : !apiReady
-                  ? 'Start interview — waking the interviewer'
-                  : 'Start interview'}
-            </button>
-          )}
-          {!apiReady && (
-            <p className="hint">
-              The first visit can take up to a minute to wake — go ahead and pick a résumé
-              meanwhile.
-            </p>
-          )}
-        </section>
-      </main>
+      <StartScreen
+        apiReady={apiReady}
+        status={status}
+        error={error}
+        onDismissError={() => setError(null)}
+        resumeName={resumeName}
+        resumeStatus={resumeStatus}
+        onResumeChange={handleResumeChange}
+        resumeId={resumeId}
+        fallbackOffer={fallbackOffer}
+        onStartInterview={startInterview}
+        onCancelFallback={() => setFallbackOffer(null)}
+      />
     )
   }
 
@@ -602,44 +523,16 @@ function App() {
         ) : (
           <>
             {dsa && !dsaSubmitted && (
-              <div className="dsa-pane">
-                <p className="dsa-signature"><code>{dsa.signature}</code></p>
-                <CodeMirror
-                  value={code}
-                  height="220px"
-                  extensions={[python()]}
-                  onChange={setCode}
-                />
-                <div className="dsa-actions">
-                  <button type="button" onClick={runCode} disabled={running || status === 'thinking'}>
-                    {running ? 'Running…' : '▶ Run tests'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={submitCode}
-                    disabled={running || status === 'thinking'}
-                  >
-                    {status === 'thinking' ? 'Submitting…' : 'Submit'}
-                  </button>
-                </div>
-                {runReport && (
-                  <div className="dsa-results">
-                    {runReport.status === 'ok' ? (
-                      <p className={runReport.passed === runReport.total ? 'passed' : 'failed'}>
-                        {runReport.passed} of {runReport.total} test cases passed
-                      </p>
-                    ) : (
-                      <p className="failed">{runReport.error}</p>
-                    )}
-                    {runReport.results.filter((r) => !r.passed).map((r, i) => (
-                      <p key={i} className="dsa-fail">
-                        <code>{JSON.stringify(r.args)}</code> → expected{' '}
-                        <code>{JSON.stringify(r.expected)}</code>, got <code>{r.got}</code>
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <CodingWorkspace
+                dsa={dsa}
+                code={code}
+                onCodeChange={setCode}
+                running={running}
+                status={status}
+                onRun={runCode}
+                onSubmit={submitCode}
+                runReport={runReport}
+              />
             )}
             <Composer
               value={draft}
@@ -656,90 +549,7 @@ function App() {
 
       {done && evaluating && <p className="hint">Scoring your interview…</p>}
 
-      {done && evaluation && (
-        <section className="evaluation">
-          <h2>How you did</h2>
-          <p className="evaluation-assessment">{evaluation.assessment}</p>
-
-          <p className="hint">
-            answered {evaluation.coverage.answered} of {evaluation.coverage.total}
-          </p>
-          {Object.entries(evaluation.averages).map(([dimension, value]) => (
-            <ScoreRow key={dimension} label={dimension} value={value} />
-          ))}
-
-          {evaluation.strengths.length > 0 && (
-            <>
-              <h3>Strengths</h3>
-              <ul>{evaluation.strengths.map((s, i) => <li key={i}>{s}</li>)}</ul>
-            </>
-          )}
-
-          {evaluation.improvements.length > 0 && (
-            <>
-              <h3>Work on</h3>
-              <ul>{evaluation.improvements.map((s, i) => <li key={i}>{s}</li>)}</ul>
-            </>
-          )}
-
-          <h3>Question by question</h3>
-          {evaluation.questions.map((q, i) => (
-            <div key={i} className="evaluation-question">
-              <p className="evaluation-question-text">{q.question}</p>
-              {q.skipped ? (
-                <p className="hint">Not answered</p>
-              ) : q.unscored ? (
-                <p className="hint">Couldn't be scored</p>
-              ) : (
-                <>
-                  <ScoreRow label="correctness" value={q.correctness} />
-                  <ScoreRow label="depth" value={q.depth} />
-                  <ScoreRow label="clarity" value={q.clarity} />
-                  <p>{q.comment}</p>
-                </>
-              )}
-            </div>
-          ))}
-
-          {evaluation.dsa && evaluation.dsa.questions.length > 0 && (
-            <>
-              <h3>Coding round</h3>
-              {Object.entries(evaluation.dsa.averages).map(([dimension, value]) => (
-                <ScoreRow key={dimension} label={dimension.replace('_', ' ')} value={value} />
-              ))}
-              <p className="hint">hints used: {evaluation.dsa.hints_used}</p>
-              {evaluation.dsa.questions.map((q, i) => (
-                <div key={i} className="evaluation-question">
-                  <p className="evaluation-question-text">{q.question}</p>
-                  {q.skipped ? (
-                    <p className="hint">Never submitted</p>
-                  ) : (
-                    <>
-                      <p className={q.tests.passed === q.tests.total ? 'passed' : 'failed'}>
-                        tests: {q.tests.passed}/{q.tests.total}
-                        {q.tests.status !== 'ok' && ` (${q.tests.status})`}
-                      </p>
-                      {!q.unscored && (
-                        <>
-                          <ScoreRow label="code quality" value={q.code_quality} />
-                          <ScoreRow label="approach" value={q.approach} />
-                        </>
-                      )}
-                    </>
-                  )}
-                  {q.unscored && <p className="hint">The code itself couldn't be scored</p>}
-                  {q.comment && <p>{q.comment}</p>}
-                  {(q.hints > 0 || q.runs > 0) && (
-                    <p className="hint">
-                      {q.hints} hint(s) · {q.runs} test run(s) while coding
-                    </p>
-                  )}
-                </div>
-              ))}
-            </>
-          )}
-        </section>
-      )}
+      {done && evaluation && <Evaluation evaluation={evaluation} />}
 
     </main>
   )
