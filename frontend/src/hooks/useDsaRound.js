@@ -87,7 +87,10 @@ export function useDsaRound({
     return () => clearInterval(timer)
     // Deps are deliberately narrow: statusRef, setStatus, appendAssistant, and
     // onError are stable refs/callbacks read via closure, not values whose
-    // change should re-subscribe the poll.
+    // change should re-subscribe the poll. Adding them would tear down and
+    // restart the 25s interval on every render, so a check-in could never fire.
+    // oxlint honours this directive for its react-hooks rules.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dsa, dsaSubmitted, sessionId, voice])
 
   async function runCode() {
