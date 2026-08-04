@@ -1,6 +1,6 @@
 # Decision index
 
-The single roll-up of every architectural decision in MockMate — what's decided,
+The single roll-up of every architectural decision in Callback — what's decided,
 what's still open, and where the open ones stand. Each row's `Status` mirrors the
 `Status:` line inside that ADR; this table is the at-a-glance view, the ADR file
 is the detail.
@@ -46,6 +46,7 @@ index that drifts from the ADRs is worse than no index.
 | [0026](0026-stt-resume-prompt.md) | Bias transcription with a résumé-derived vocabulary digest | accepted |
 | [0027](0027-check-in-policy-owns-its-state.md) | The check-in policy owns its own state | accepted · amends [0018](0018-watching-interviewer-check-ins.md) |
 | [0028](0028-a-reply-starts-the-watcher-cooldown.md) | A chat reply starts the Watcher's cooldown | accepted · amends [0019](0019-voice-live-while-coding.md) |
+| [0030](0030-callback-rename-and-visual-system.md) | Callback — rename, and a monochrome visual system | accepted |
 
 ## Open — decided direction, not yet closed out
 
