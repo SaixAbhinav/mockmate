@@ -15,6 +15,7 @@ export function useVoices(onError) {
       .catch(() => onError('backend not reachable — is it running on port 8000?'))
     // Deps are deliberately empty: onError is a stable callback read via
     // closure, and this fetch is meant to run once on mount, not on rerenders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return { voices, voice, setVoice }

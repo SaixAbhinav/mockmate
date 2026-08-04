@@ -25,6 +25,7 @@ export function useEvaluation({ phase, sessionId, onError }) {
     return () => controller.abort()
     // Deps are deliberately narrow: onError is a stable callback read via
     // closure, not a value whose change should re-fetch the Evaluation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, sessionId])
 
   function resetEvaluation() {
