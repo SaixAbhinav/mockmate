@@ -30,7 +30,14 @@ function ScoreRow({ label, value }) {
   return (
     <div className="score-row">
       <span>{label}</span>
-      <span className="score-bar">
+      <span
+        className="score-bar"
+        role="meter"
+        aria-valuemin={0}
+        aria-valuemax={5}
+        aria-valuenow={value ?? 0}
+        aria-label={label}
+      >
         <span style={{ width: `${((value ?? 0) / 5) * 100}%` }} />
       </span>
       <span>{value ?? '—'}</span>
@@ -274,6 +281,7 @@ function App() {
     } catch (err) {
       if (token !== resumeUploadTokenRef.current) return // a newer upload superseded this one
       setResumeId(null)
+      setResumeName('')
       setResumeStatus('failed')
       setError(String(err))
     }
@@ -474,6 +482,15 @@ function App() {
           </div>
         </header>
 
+        {error && (
+          <div className="banner">
+            <span>{error}</span>
+            <button type="button" onClick={() => setError(null)} aria-label="Dismiss">
+              ✕
+            </button>
+          </div>
+        )}
+
         <div className="landing">
           <section className="hero">
             <img className="hero-art" src={heroArt} alt="" aria-hidden="true" />
@@ -511,7 +528,9 @@ function App() {
                 ? 'Uploading…'
                 : resumeStatus === 'ready'
                   ? 'Your interview will be built around this file'
-                  : 'PDF or .txt — or skip for a general ML/GenAI interview'}
+                  : resumeStatus === 'failed'
+                    ? 'That file could not be read — try another, or skip for a general ML/GenAI interview.'
+                    : 'PDF or .txt — or skip for a general ML/GenAI interview'}
             </span>
             <input type="file" accept=".pdf,.txt" onChange={handleResumeChange} />
           </label>
@@ -545,18 +564,12 @@ function App() {
             </button>
           )}
           {!apiReady && (
-            <p className="hint">The first visit can take up to a minute to wake (ADR 0025).</p>
+            <p className="hint">
+              The first visit can take up to a minute to wake — go ahead and pick a résumé
+              meanwhile.
+            </p>
           )}
         </section>
-
-        {error && (
-          <div className="banner">
-            <span>{error}</span>
-            <button type="button" onClick={() => setError(null)} aria-label="Dismiss">
-              ✕
-            </button>
-          </div>
-        )}
       </main>
     )
   }

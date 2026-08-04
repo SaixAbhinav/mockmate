@@ -35,7 +35,8 @@ ever done it gets its own PR and its own `terraform apply`.
 
 **The interface is monochrome, with colour reserved for state.** White on black, no brand
 hue. The only colour in the application is `#3fb950` for passing tests and `#e5484d` for
-failing ones, plus `#d29922` for transient status. This is functional before it is
+failing ones and for error states more broadly (the same red also borders the error
+banner), plus `#d29922` for transient status. This is functional before it is
 aesthetic: the one place colour carries real information is the test report in the coding
 round (ADR 0016/0017), and a brand accent elsewhere competes with it.
 

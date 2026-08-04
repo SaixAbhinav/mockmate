@@ -314,7 +314,7 @@ button.recording {
 
 .hint {
   font-size: 0.8125rem;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 /* ---- coding round (current single-column shape; PR 3 rebuilds it) ----- */
@@ -421,6 +421,9 @@ button.recording {
 
 @media (max-width: 640px) {
   .wrap { padding: var(--s4) var(--s3); }
-  .hero-art { display: none; }
   .messages { padding: var(--s4); gap: var(--s4); }
+}
+
+@media (max-width: 860px) {
+  .hero-art { display: none; }
 }

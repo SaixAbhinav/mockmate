@@ -11,6 +11,7 @@
   --text: #fafafa;
   --text-muted: #8a8a8a;
   --text-dim: #5c5c5c;
+  --text-bright: #fff;
 
   --pass: #3fb950;
   --fail: #e5484d;
@@ -98,7 +99,7 @@ button {
   cursor: pointer;
 }
 
-button:hover:not(:disabled) { background: #fff; }
+button:hover:not(:disabled) { background: var(--text-bright); }
 
 button:disabled {
   background: transparent;
