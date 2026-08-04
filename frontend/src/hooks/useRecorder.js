@@ -88,7 +88,7 @@ export function useRecorder({ sessionId, setStatus, onError, onTranscript }) {
           setStatus('idle')
           return
         }
-        onTranscript(data.transcript)
+        await onTranscript(data.transcript)
       } catch (err) {
         onError(String(err))
         setStatus('idle')

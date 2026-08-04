@@ -18,21 +18,22 @@ function setup() {
   const statusRef = createRef()
   statusRef.current = 'idle'
   const appendAssistant = vi.fn()
-  const applyProgress = vi.fn()
+  const applySubmitProgress = vi.fn()
+  const setStatus = vi.fn()
+  const onError = vi.fn()
   const { result } = renderHook(() =>
     useDsaRound({
       sessionId: 's1',
       voice: 'v1',
       dsa,
-      questionNumber: 1,
       statusRef,
-      setStatus: vi.fn(),
-      onError: vi.fn(),
+      setStatus,
+      onError,
       appendAssistant,
-      applyProgress,
+      applySubmitProgress,
     })
   )
-  return { result, appendAssistant, applyProgress, statusRef }
+  return { result, appendAssistant, applySubmitProgress, setStatus, onError, statusRef }
 }
 
 describe('useDsaRound', () => {
@@ -124,5 +125,27 @@ describe('useDsaRound', () => {
 
     await waitFor(() => expect(appendAssistant).toHaveBeenCalledWith('still there?'))
     expect(playAudio).not.toHaveBeenCalled()
+  })
+
+  it('wires submitCode through to applySubmitProgress, appendAssistant, and dsaSubmitted', async () => {
+    const submitBody = {
+      run: { passed: true },
+      reply: 'Nice work on that one.',
+      phase: 'coding',
+      question_number: 2,
+      total_questions: 2,
+      stage: 'submitted',
+      audio_b64: 'xyz',
+    }
+    mocks.respond('/dsa/submit', submitBody)
+    const { result, appendAssistant, applySubmitProgress } = setup()
+
+    await act(async () => {
+      await result.current.submitCode()
+    })
+
+    expect(applySubmitProgress).toHaveBeenCalledWith(submitBody)
+    expect(appendAssistant).toHaveBeenCalledWith('Nice work on that one.')
+    expect(result.current.dsaSubmitted).toBe(true)
   })
 })

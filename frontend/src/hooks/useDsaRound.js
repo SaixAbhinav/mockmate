@@ -85,7 +85,9 @@ export function useDsaRound({
       }
     }, CHECK_IN_POLL_MS)
     return () => clearInterval(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Deps are deliberately narrow: statusRef, setStatus, appendAssistant, and
+    // onError are stable refs/callbacks read via closure, not values whose
+    // change should re-subscribe the poll.
   }, [dsa, dsaSubmitted, sessionId, voice])
 
   async function runCode() {
