@@ -14,7 +14,7 @@ const dsa = {
   test_cases: [],
 }
 
-function setup(mocks) {
+function setup() {
   const statusRef = createRef()
   statusRef.current = 'idle'
   const appendAssistant = vi.fn()
@@ -44,7 +44,7 @@ describe('useDsaRound', () => {
   })
 
   it('does not snapshot untouched starter code', async () => {
-    setup(mocks)
+    setup()
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
@@ -54,7 +54,7 @@ describe('useDsaRound', () => {
 
   it('snapshots once the Candidate has actually typed', async () => {
     mocks.respond('/dsa/snapshot', {})
-    const { result } = setup(mocks)
+    const { result } = setup()
     act(() => {
       result.current.setCode(dsa.starter_code + '    return []\n')
     })
@@ -67,7 +67,7 @@ describe('useDsaRound', () => {
 
   it('adds no turn when the interviewer stays silent', async () => {
     mocks.respond('/dsa/check-in', { action: 'silent' })
-    const { appendAssistant } = setup(mocks)
+    const { appendAssistant } = setup()
     await act(async () => {
       vi.advanceTimersByTime(26000)
     })
@@ -76,7 +76,7 @@ describe('useDsaRound', () => {
 
   it('adds a turn when the interviewer checks in', async () => {
     mocks.respond('/dsa/check-in', { action: 'nudge', remark: 'How is it going?', audio_b64: '' })
-    const { appendAssistant } = setup(mocks)
+    const { appendAssistant } = setup()
     await act(async () => {
       vi.advanceTimersByTime(26000)
     })
@@ -85,7 +85,7 @@ describe('useDsaRound', () => {
 
   it('does not poll while the Candidate is speaking', async () => {
     mocks.respond('/dsa/check-in', { action: 'nudge', remark: 'x', audio_b64: '' })
-    const { statusRef, appendAssistant } = setup(mocks)
+    const { statusRef, appendAssistant } = setup()
     statusRef.current = 'recording'
     await act(async () => {
       vi.advanceTimersByTime(26000)
@@ -95,7 +95,7 @@ describe('useDsaRound', () => {
 
   it('adds the transcript turn but does not play audio if the Candidate starts speaking while a check-in is in flight', async () => {
     mocks.respond('/dsa/check-in', { action: 'nudge', remark: 'still there?', audio_b64: 'abc' })
-    const { statusRef, appendAssistant } = setup(mocks)
+    const { statusRef, appendAssistant } = setup()
 
     // Defer the check-in response so we can flip statusRef mid-flight, after
     // the request has gone out but before its reply is handled.
