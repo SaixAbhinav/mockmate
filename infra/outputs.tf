@@ -29,3 +29,10 @@ output "gemini_api_key_parameter_name" {
   description = "SSM parameter name holding the Gemini API key. Set the real value out-of-band (see README) before the Lambda depends on it."
   value       = aws_ssm_parameter.gemini_api_key.name
 }
+
+# PR 2b's own output - the backend URL for the frontend (PR 3) and for a
+# post-apply smoke test (see infra/README.md).
+output "api_endpoint" {
+  description = "Invoke URL of the HTTP API's $default stage - the backend's public base URL. Append /api/health for a smoke test."
+  value       = aws_apigatewayv2_api.http.api_endpoint
+}
