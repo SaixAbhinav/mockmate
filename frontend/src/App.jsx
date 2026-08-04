@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { api } from './api'
+import { playAudio } from './lib/audio'
+import { ScoreRow } from './components/ScoreRow'
+import { ErrorBanner } from './components/ErrorBanner'
+import { Transcript } from './components/Transcript'
+import { Composer } from './components/Composer'
 import './App.css'
 import heroArt from './assets/hero-art.png'
 import mark from './assets/mark.svg'
@@ -24,26 +29,6 @@ const MIN_TRANSCRIPT_CHARS = 2
 // Inferred labels are already human-readable; only the curated bank's own slug
 // needs prettifying (ADR 0023).
 const DOMAIN_LABELS = { ml_genai: 'ML / GenAI' }
-
-// Scores are 1-5; a bar reads faster than a number in a pill.
-function ScoreRow({ label, value }) {
-  return (
-    <div className="score-row">
-      <span>{label}</span>
-      <span
-        className="score-bar"
-        role="meter"
-        aria-valuemin={0}
-        aria-valuemax={5}
-        aria-valuenow={value ?? 0}
-        aria-label={label}
-      >
-        <span style={{ width: `${((value ?? 0) / 5) * 100}%` }} />
-      </span>
-      <span>{value ?? '—'}</span>
-    </div>
-  )
-}
 
 function App() {
   const [screen, setScreen] = useState('start') // start | interview
@@ -173,7 +158,7 @@ function App() {
         if (data.action === 'silent') return
         setHistory((h) => [...h, { role: 'assistant', content: data.remark }])
         if (statusRef.current === 'idle') {
-          await playAudio(data.audio_b64)
+          await playAudio(data.audio_b64, setStatus)
         }
       } catch {
         // a failed check-in is a silent one
@@ -181,13 +166,6 @@ function App() {
     }, CHECK_IN_POLL_MS)
     return () => clearInterval(timer)
   }, [dsa, dsaSubmitted, sessionId, voice])
-
-  async function playAudio(audioB64) {
-    setStatus('speaking')
-    const audio = new Audio(`data:audio/mp3;base64,${audioB64}`)
-    audio.onended = () => setStatus('idle')
-    await audio.play()
-  }
 
   async function startInterview(allowBankFallback = false) {
     setError(null)
@@ -222,7 +200,7 @@ function App() {
       setWarmUpSource(data.warm_up_source)
       setPhase(null)
       setScreen('interview')
-      await playAudio(data.audio_b64)
+      await playAudio(data.audio_b64, setStatus)
     } catch {
       // A raw fetch error is not something to show a Candidate. On a first
       // visit the likeliest cause is simply that the API is still waking
@@ -324,7 +302,7 @@ function App() {
       setLatencyMs(Math.round(performance.now() - t0))
       setHistory([...newHistory, { role: 'assistant', content: data.reply }])
       applyProgress(data)
-      await playAudio(data.audio_b64)
+      await playAudio(data.audio_b64, setStatus)
     } catch (err) {
       setHistory(history) // roll back the optimistic append so a failed turn leaves no orphan message
       setError(String(err))
@@ -368,7 +346,7 @@ function App() {
       setQuestionNumber(data.question_number)
       setTotalQuestions(data.total_questions)
       setStage(data.stage)
-      await playAudio(data.audio_b64)
+      await playAudio(data.audio_b64, setStatus)
     } catch (err) {
       setError(String(err))
       setStatus('idle')
@@ -482,14 +460,7 @@ function App() {
           </div>
         </header>
 
-        {error && (
-          <div className="banner">
-            <span>{error}</span>
-            <button type="button" onClick={() => setError(null)} aria-label="Dismiss">
-              ✕
-            </button>
-          </div>
-        )}
+        <ErrorBanner error={error} onDismiss={() => setError(null)} />
 
         <div className="landing">
           <section className="hero">
@@ -608,14 +579,7 @@ function App() {
         </div>
       </header>
 
-      {error && (
-        <div className="banner">
-          <span>{error}</span>
-          <button type="button" onClick={() => setError(null)} aria-label="Dismiss">
-            ✕
-          </button>
-        </div>
-      )}
+      <ErrorBanner error={error} onDismiss={() => setError(null)} />
 
       {resumeId && warmUpSource === 'bank' && (
         <p className="hint">
@@ -627,21 +591,7 @@ function App() {
       )}
 
       <section className="chat">
-        <div className="messages">
-          {history.map((m, i) => (
-            <div
-              key={i}
-              className={`turn ${m.role}${done && i === history.length - 1 ? ' wrap-up' : ''}`}
-            >
-              <span className="turn-label">{m.role === 'user' ? 'You' : 'Interviewer'}</span>
-              <p className="turn-text">{m.content}</p>
-            </div>
-          ))}
-          {(status === 'thinking' || status === 'transcribing') && (
-            <p className="hint">{status}…</p>
-          )}
-          <div ref={chatEndRef} />
-        </div>
+        <Transcript history={history} done={done} endRef={chatEndRef} status={status} />
 
         {done ? (
           <div className="composer">
@@ -691,33 +641,15 @@ function App() {
                 )}
               </div>
             )}
-            <form onSubmit={handleTextSubmit} className="composer">
-              <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder={
-                  dsa && !dsaSubmitted ? 'Think aloud or ask the interviewer' : 'Type here'
-                }
-                disabled={status === 'thinking'}
-              />
-              <button type="submit" disabled={status === 'thinking' || !draft.trim()}>
-                Send
-              </button>
-              {status === 'recording' ? (
-                <button type="button" className="recording" onClick={stopRecording}>
-                  ⏹ Stop
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={startRecording}
-                  disabled={status !== 'idle'}
-                  aria-label="Answer by voice"
-                >
-                  🎤
-                </button>
-              )}
-            </form>
+            <Composer
+              value={draft}
+              onDraftChange={setDraft}
+              onSubmit={handleTextSubmit}
+              status={status}
+              placeholder={dsa && !dsaSubmitted ? 'Think aloud or ask the interviewer' : 'Type here'}
+              onStartRecording={startRecording}
+              onStopRecording={stopRecording}
+            />
           </>
         )}
       </section>
