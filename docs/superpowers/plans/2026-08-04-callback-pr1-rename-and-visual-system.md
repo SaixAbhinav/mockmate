@@ -36,6 +36,34 @@ evaluation screens visibly broken between PR 1 and PR 2. **So PR 1 restyles ever
 current single-column shape. PR 3 still owns the coding round's *layout* rebuild. PR 2
 remains a pure extraction with no visual change.
 
+## Deviations applied during execution
+
+- **`outline: none` on `input:focus` was not shipped.** A border-only focus change is
+  invisible against `--surface` and fails WCAG 2.4.7. Shipped `index.css` instead adds a
+  `:focus-visible` outline ring on `input, select, textarea, button, a, [tabindex]`, and
+  drops `outline: none` entirely. Approved by the owner.
+- **`.resume-drop input { display: none; }` was not shipped.** `display: none` removes the
+  file input from the tab order, so keyboard users could never open the file picker.
+  Shipped `App.css` instead visually hides the input (`position: absolute`, 1x1px,
+  `opacity: 0`, `pointer-events: none`) while keeping it focusable, and moves the visible
+  focus ring to the wrapping `.resume-drop` label via `:focus-within`. Approved by the
+  owner.
+
+The following post-review fixes also change shipped behaviour beyond what this plan
+originally specified:
+
+- **(A)** `handleResumeChange`'s catch block now clears `resumeName` on a failed upload,
+  and the résumé card's hint gets a dedicated `failed` branch, so a stale filename from a
+  prior successful upload can no longer be shown alongside a failed one.
+- **(B)** The start screen's error banner moved from the bottom of `<main>` to directly
+  after `</header>`, matching the interview screen's banner placement.
+- **(F)** `.hint` now uses `--text-muted` (5.29:1 against `--surface`) instead of
+  `--text-dim` (2.73:1, fails WCAG AA), since `.hint` carries real instructional copy.
+  `--text-dim` is unchanged everywhere else (`::placeholder`, disabled controls,
+  `.progress`, `.turn-label`).
+- **(G)** `.hero-art` now hides at `max-width: 860px` instead of `640px`, to stop it
+  overlapping the headline box between those two breakpoints.
+
 ## File Structure
 
 | File | Responsibility | Action |
@@ -303,10 +331,18 @@ textarea {
   color: var(--text);
 }
 
+/* A visible focus ring, not just a border shift: the border-only version was
+   invisible against --surface and failed WCAG 2.4.7. Monochrome and flat, so
+   it stays inside the design constraints (ADR 0030). */
+:where(input, select, textarea, button, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+  border-radius: var(--r);
+}
+
 input:focus,
 select:focus,
 textarea:focus {
-  outline: none;
   border-color: var(--border-strong);
 }
 
@@ -530,7 +566,22 @@ git commit -m "Replace the design tokens with the monochrome set (ADR 0030)"
 
 .resume-drop:hover { border-color: var(--text-dim); }
 
-.resume-drop input { display: none; }
+/* Visually hidden, NOT display:none - the input must stay in the tab order or
+   keyboard users cannot open the file picker at all. The visible focus ring
+   moves to the wrapping label via :focus-within. */
+.resume-drop input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.resume-drop:focus-within {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+  border-color: var(--text-dim);
+}
 
 .fallback-offer {
   display: flex;
@@ -1221,15 +1272,21 @@ print(Image.open('public/og.png').size)
 "
 ```
 
-Expected: `(1200, 630)`. Confirm the file is under 300 KB:
+Expected: `(1200, 630)`. Confirm the file size:
 
 ```bash
 ls -l frontend/public/og.png
 ```
 
+The shipped file is 330,804 bytes — over the original 300 KB target. That overage was
+signed off: the palette reduction that produced the monochrome art also dimmed the white
+strokes, which cost PNG compression the large flat runs it would otherwise get, and
+re-crushing further to hit 300 KB visibly degraded the line art. 330,804 bytes for a
+social-preview image loaded once per share is an acceptable trade.
+
 - [ ] **Step 2: Derive the landing art by cropping off the baked-in wordmark**
 
-The scene occupies roughly the right 55% of the source. Crop it, then downscale to a
+The scene occupies roughly the right 48% of the source. Crop it, then downscale to a
 sensible display width so a 1 MB PNG is not shipped to every visitor:
 
 ```bash
@@ -1237,7 +1294,7 @@ cd frontend && python -c "
 from PIL import Image
 im = Image.open('src/assets/Hero_gpt.png').convert('RGBA')
 w, h = im.size
-art = im.crop((int(w * 0.45), 0, w, h))
+art = im.crop((int(w * 0.52), 0, w, h))
 art.thumbnail((900, 900), Image.LANCZOS)
 art.save('src/assets/hero-art.png', optimize=True)
 print(art.size)
@@ -1245,9 +1302,11 @@ print(art.size)
 ls -l frontend/src/assets/hero-art.png
 ```
 
-Expected: roughly `(900, 480)` and well under 300 KB. Open the file and confirm no part of
-the word "Callback" or the tagline is still visible — if any letter survives, raise the
-`0.45` and run it again.
+Expected: `(823, 900)` — the cropped slice is portrait, not the roughly-landscape `(900,
+480)` originally guessed, because the source's scene occupies less than half its width and
+more than half its height. Well under 300 KB. Open the file and confirm no part of the word
+"Callback" or the tagline is still visible — if any letter survives, raise the `0.52` and
+run it again.
 
 - [ ] **Step 3: Create the return mark**
 

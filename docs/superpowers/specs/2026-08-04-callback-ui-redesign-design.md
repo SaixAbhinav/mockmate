@@ -160,16 +160,17 @@ means re-reading 768 lines.
 
 Keeps its ADR 0025 purpose — reading copy gives the sleeping container time to wake. Gains
 the line-art hero, the serif headline, and the lockup. The raw `<input type="file">`
-becomes a drop-target card with three states: empty, uploading, ready (filename with
-change/remove). The waking notice moves from a detached italic aside to inline status on
-the Start button, attached to the thing it is actually blocking.
+becomes a drop-target card with four states: empty, uploading, ready (filename), and
+failed (no filename, an error hint, and no remove affordance in any state). The waking
+notice moves from a detached italic aside to inline status on the Start button, attached
+to the thing it is actually blocking.
 
 ### Interview screen — intro and warm-up
 
 Single centred column, max 720px. Speaker-ruled transcript. Status collapses from three
 separate spans into one dot-and-word indicator; measured latency moves behind its `title`
 rather than occupying permanent chrome. Progress (`warm-up · question 2 of 5 · probing`)
-becomes a slim bar under the header.
+becomes a mono uppercase text span inside the header lockup.
 
 ### Coding round
 
@@ -255,8 +256,8 @@ Supplied externally (generated with ChatGPT), to this specification:
 
 1. **Hero illustration** — monoline scene: a desk, laptop, chair, lamp, a window, and
    concentric arcs suggesting voice. White stroke on transparent, ~1.1px at 40px scale,
-   round caps and joins, no fill, no shading. Wide crop, intended to bleed off the right
-   edge behind the headline at ~50% opacity.
+   round caps and joins, no fill, no shading. Shipped as an 823×900 portrait crop, sitting
+   beside the headline (not bleeding behind it) at 0.35 opacity.
 2. **Four section icons** — résumé, voice, coding round, evaluation. Same stroke weight and
    style, 40×40 artboard, so one set covers the landing steps and section markers.
 3. **Wordmark** — "Callback", SVG, single colour so it inherits `currentColor`. The idea to
