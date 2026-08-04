@@ -1,8 +1,10 @@
-# MockMate (working title)
+# Callback
+
+> Voice interview practice, in the open.
 
 [![CI](https://github.com/SaixAbhinav/mockmate/actions/workflows/ci.yml/badge.svg)](https://github.com/SaixAbhinav/mockmate/actions/workflows/ci.yml)
 
-A voice-based AI mock interviewer you can run for free — the "$150/month
+A voice-based AI interviewer you can run for free — the "$150/month
 interview-prep SaaS" genre, rebuilt as an open, self-hostable app.
 
 Speak your answers; an AI interviewer asks questions, probes follow-ups, and

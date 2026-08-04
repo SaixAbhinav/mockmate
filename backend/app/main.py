@@ -1,4 +1,4 @@
-"""MockMate interviewer agent API (Day 2, ADR 0006/0007).
+"""Callback interviewer agent API (Day 2, ADR 0006/0007).
 
 POST /api/session                    -> starts a Session, returns Q1
 POST /api/transcribe   (audio file)  -> {transcript}
@@ -79,7 +79,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="MockMate")
+app = FastAPI(title="Callback")
 
 
 def _cors_origins() -> list[str]:
