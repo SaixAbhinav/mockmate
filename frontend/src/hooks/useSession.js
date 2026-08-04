@@ -114,7 +114,11 @@ export function useSession({
   }
 
   // A submit reply reports progress but carries no dsa payload, so it moves the
-  // interview on without touching the editor.
+  // interview on without touching the editor. Submits must use this (not
+  // `applyProgress`): `applyProgress` sets `dsa` from `data.dsa ?? null`, and a
+  // submit reply has no `dsa`, so routing it through `applyProgress` would null
+  // out `dsa` and reset `dsaSubmitted`, putting the editor back on screen after
+  // the Candidate already submitted.
   function applySubmitProgress(data) {
     setPhase(data.phase)
     setQuestionNumber(data.question_number)
@@ -166,7 +170,6 @@ export function useSession({
     startInterview,
     startNewInterview,
     sendTranscript,
-    applyProgress,
     applySubmitProgress,
     appendAssistant,
   }

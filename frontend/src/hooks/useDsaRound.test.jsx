@@ -2,7 +2,10 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { createRef } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { installMocks } from '../test/mocks'
+import { playAudio } from '../lib/audio'
 import { useDsaRound } from './useDsaRound'
+
+vi.mock('../lib/audio', () => ({ playAudio: vi.fn() }))
 
 const dsa = {
   function_name: 'two_sum',
@@ -37,6 +40,7 @@ describe('useDsaRound', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     mocks = installMocks()
+    playAudio.mockClear()
   })
 
   it('does not snapshot untouched starter code', async () => {
@@ -87,5 +91,38 @@ describe('useDsaRound', () => {
       vi.advanceTimersByTime(26000)
     })
     expect(appendAssistant).not.toHaveBeenCalled()
+  })
+
+  it('adds the transcript turn but does not play audio if the Candidate starts speaking while a check-in is in flight', async () => {
+    mocks.respond('/dsa/check-in', { action: 'nudge', remark: 'still there?', audio_b64: 'abc' })
+    const { statusRef, appendAssistant } = setup(mocks)
+
+    // Defer the check-in response so we can flip statusRef mid-flight, after
+    // the request has gone out but before its reply is handled.
+    const originalFetch = globalThis.fetch
+    let resolveGate
+    const gate = new Promise((resolve) => {
+      resolveGate = resolve
+    })
+    globalThis.fetch = vi.fn(async (url, init) => {
+      if (String(url).includes('/dsa/check-in')) {
+        await gate
+      }
+      return originalFetch(url, init)
+    })
+
+    // Fire the poll: this issues the request and parks it on `gate`.
+    act(() => {
+      vi.advanceTimersByTime(25000)
+    })
+
+    // The Candidate starts speaking while the request is still in flight.
+    statusRef.current = 'recording'
+    resolveGate()
+
+    globalThis.fetch = originalFetch
+
+    await waitFor(() => expect(appendAssistant).toHaveBeenCalledWith('still there?'))
+    expect(playAudio).not.toHaveBeenCalled()
   })
 })
