@@ -1,247 +1,411 @@
+/* Component styles (ADR 0030). Every value here comes from a token in
+   index.css - no literal colour, no gap outside the spacing scale. */
+
 .wrap {
+  width: 100%;
   max-width: 720px;
   margin: 0 auto;
-  padding: 1.5rem 1rem;
-  text-align: left;
+  padding: var(--s5) var(--s4);
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
   box-sizing: border-box;
 }
 
-.topbar h1 {
-  margin: 0 0 0.5rem;
+/* PR 3 widens the page for the coding round by adding this class. Defined now
+   so the layout mode exists before the round is rebuilt. */
+.wrap--wide { max-width: 1140px; }
+
+/* ---- header ---------------------------------------------------------- */
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  padding-bottom: var(--s4);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--s5);
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+}
+
+.brand-name {
+  font-family: var(--serif);
+  font-size: 1.25rem;
+  color: var(--text);
+}
+
+/* The return mark, sized to the wordmark's cap height. */
+.brand-mark {
+  height: 0.75em;
+  width: auto;
+  opacity: 0.85;
+}
+
+.brand-tag {
+  font-size: 0.75rem;
+  color: var(--text-dim);
 }
 
 .controls {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-
-button.recording {
-  background: #d43;
-  color: white;
+  gap: var(--s4);
 }
 
 .voice-row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  color: #888;
+  gap: var(--s2);
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 
-.voice-row select {
-  padding: 0.3rem 0.5rem;
-  border-radius: 6px;
-  border: 1px solid #555;
-  background: transparent;
-  color: inherit;
-}
-
-.voice-row select option {
-  color: #222;
-}
-
+/* One indicator instead of three spans. The dot carries state colour; the
+   word stays neutral so the colour reads as signal, not decoration. */
 .status {
-  font-size: 0.9rem;
-  color: #888;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 
-.status-recording { color: #d43; }
-.status-transcribing { color: #b80; }
-.status-thinking { color: #b80; }
-.status-speaking { color: #283; }
-
-.latency {
-  font-size: 0.85rem;
-  color: #888;
+.status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
 }
+
+.status-recording::before { background: var(--fail); }
+.status-transcribing::before,
+.status-thinking::before { background: var(--pending); }
+.status-speaking::before { background: var(--text); }
 
 .progress {
-  font-size: 0.85rem;
-  color: #888;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
+
+/* ---- landing --------------------------------------------------------- */
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: var(--s6);
+}
+
+.hero-art {
+  position: absolute;
+  right: -32px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 300px;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.hero-body {
+  position: relative;
+  max-width: 460px;
+}
+
+.kicker {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--s4);
+}
+
+.hero h1 {
+  font-size: clamp(2rem, 6vw, 3rem);
+  margin-bottom: var(--s4);
+}
+
+.landing .lede {
+  color: var(--text-muted);
+  margin-bottom: var(--s5);
+}
+
+.landing-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.landing-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding-left: var(--s3);
+  border-left: 1px solid var(--border);
+}
+
+/* ---- start panel ----------------------------------------------------- */
 
 .start-panel {
   display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-top: 1rem;
+  flex-direction: column;
+  gap: var(--s4);
+  align-items: flex-start;
 }
+
+.resume-drop {
+  width: 100%;
+  padding: var(--s5);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.resume-drop:hover { border-color: var(--text-dim); }
+
+.resume-drop input { display: none; }
 
 .fallback-offer {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--s3);
+  align-items: flex-start;
+  padding: var(--s4);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
 }
 
 button.secondary {
   background: transparent;
-  border: 1px solid #555;
-  color: #888;
+  border-color: var(--border-strong);
+  color: var(--text-muted);
 }
 
-.messages .wrap-up {
-  color: #7ab;
-  font-style: italic;
+button.secondary:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
 }
 
-/* Chat panel (wireframe v1): scrollable messages, composer pinned at bottom */
+button.recording {
+  background: transparent;
+  border-color: var(--fail);
+  color: var(--fail);
+}
+
+/* ---- chat ------------------------------------------------------------ */
+
 .chat {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid #555;
-  border-radius: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
   overflow: hidden;
 }
 
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
 }
 
-.messages p {
-  line-height: 1.6;
-  margin: 0 0 0.75rem;
+/* Speaker rules, not bubbles: a small-caps label over the text with a rule
+   down the left edge. The interviewer's rule is solid; yours is quiet. */
+.turn {
+  border-left: 2px solid var(--border);
+  padding-left: var(--s3);
 }
 
-.messages .assistant {
-  color: #7ab;
+.turn.assistant { border-left-color: var(--text); }
+
+.turn-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: var(--s1);
 }
+
+.turn.assistant .turn-label { color: var(--text-muted); }
+
+.turn-text { color: var(--text-muted); }
+
+.turn.assistant .turn-text { color: var(--text); }
+
+.turn.wrap-up .turn-text { font-family: var(--serif); font-size: 1.0625rem; }
 
 .composer {
   display: flex;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  border-top: 1px solid #555;
+  gap: var(--s2);
+  padding: var(--s3);
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
 }
 
-.composer input {
-  flex: 1;
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  border: 1px solid #555;
+.composer input { flex: 1; }
+
+/* ---- messages to the user -------------------------------------------- */
+
+.banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s4);
+  border: 1px solid var(--fail);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.875rem;
+}
+
+.banner button {
   background: transparent;
-  color: inherit;
-}
-
-.error {
-  color: #d43;
-  margin: 0.5rem 0 0;
+  border: none;
+  color: var(--text-muted);
+  padding: 0;
 }
 
 .hint {
-  color: #888;
-  font-style: italic;
+  font-size: 0.8125rem;
+  color: var(--text-dim);
 }
 
-.evaluation {
-  margin-top: 1rem;
-  padding: 1rem;
-  border: 1px solid #555;
-  border-radius: 12px;
-  overflow-y: auto;
-}
-
-.evaluation h2 { margin: 0 0 0.5rem; }
-.evaluation h3 { margin: 1rem 0 0.5rem; font-size: 1rem; }
-
-.evaluation-assessment { line-height: 1.6; }
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0.5rem 0;
-}
-
-.score-chip {
-  font-size: 0.85rem;
-  padding: 0.2rem 0.6rem;
-  border: 1px solid #555;
-  border-radius: 999px;
-  color: #888;
-}
-
-.score-chip.coverage { border-color: #7ab; color: #7ab; }
-
-.evaluation-question {
-  border-top: 1px solid #333;
-  padding-top: 0.75rem;
-  margin-top: 0.75rem;
-}
-
-.evaluation-question-text { color: #7ab; margin: 0 0 0.25rem; }
+/* ---- coding round (current single-column shape; PR 3 rebuilds it) ----- */
 
 .dsa-pane {
-  border-top: 1px solid #ddd;
-  padding: 0.75rem;
+  border-top: 1px solid var(--border);
+  padding: var(--s3);
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-}
-
-.dsa-pane .cm-editor {
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  text-align: left;
+  gap: var(--s3);
 }
 
 .dsa-signature {
-  margin: 0;
-  font-size: 0.85rem;
-  color: #555;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
 }
 
-.dsa-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.dsa-results {
-  font-size: 0.85rem;
+.dsa-pane .cm-editor {
+  border: 1px solid var(--border);
+  border-radius: var(--r-code);
+  font-size: 0.8125rem;
   text-align: left;
 }
 
+.dsa-actions { display: flex; gap: var(--s2); }
+
+.dsa-results { font-size: 0.8125rem; }
+
+/* Unscoped on purpose: the evaluation's coding section reuses these outside
+   .dsa-results. These two are the only coloured text in the app. */
+.passed { color: var(--pass); }
+.failed { color: var(--fail); }
+
 .dsa-fail {
-  color: #a33;
-  margin: 0.15rem 0;
+  color: var(--text-muted);
+  margin-top: var(--s1);
 }
 
-/* With voice live while coding, the editor sits above the composer - drop the
-   pane's own bottom padding so the two don't double up. */
-.dsa-pane {
-  padding-bottom: 0;
+/* ---- evaluation ------------------------------------------------------ */
+
+.evaluation {
+  margin-top: var(--s5);
+  padding: var(--s5);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
 }
 
-/* Landing content on the start screen (ADR 0025): it gives the sleeping API
-   container time to wake while the Candidate reads. */
-.landing {
-  margin-bottom: 1.5rem;
+.evaluation h3 {
+  margin: var(--s5) 0 var(--s3);
+  color: var(--text-muted);
+  font-family: var(--sans);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
-.landing .lede {
-  font-size: 1.05rem;
-  line-height: 1.6;
-  margin: 0 0 0.75rem;
+.evaluation ul {
+  margin: 0;
+  padding-left: var(--s4);
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
 }
 
-.landing-steps {
-  margin: 0 0 0.75rem;
-  padding-left: 1.25rem;
-  line-height: 1.7;
+.evaluation-assessment { color: var(--text); }
+
+/* Scores read badly as text on a 1-5 scale, so they get a bar. */
+.score-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 32px;
+  align-items: center;
+  gap: var(--s3);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-bottom: var(--s2);
 }
 
-/* Shown only while the sleeping API container wakes. */
-.hint.waking {
-  font-style: italic;
-  opacity: 0.85;
+.score-bar {
+  height: 4px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.score-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--text);
+}
+
+.evaluation-question {
+  border-top: 1px solid var(--border);
+  padding-top: var(--s4);
+  margin-top: var(--s4);
+}
+
+.evaluation-question-text {
+  color: var(--text);
+  margin-bottom: var(--s3);
+}
+
+@media (max-width: 640px) {
+  .wrap { padding: var(--s4) var(--s3); }
+  .hero-art { display: none; }
+  .messages { padding: var(--s4); gap: var(--s4); }
 }
