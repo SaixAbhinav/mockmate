@@ -10,6 +10,8 @@ import { Evaluation } from './components/Evaluation'
 import { useVoices } from './hooks/useVoices'
 import { useApiReady } from './hooks/useApiReady'
 import { useEvaluation } from './hooks/useEvaluation'
+import { useResumeUpload } from './hooks/useResumeUpload'
+import { useRecorder } from './hooks/useRecorder'
 import './App.css'
 import mark from './assets/mark.svg'
 
@@ -18,15 +20,6 @@ import mark from './assets/mark.svg'
 // cap) - the frontend just asks often and usually hears "silent".
 const SNAPSHOT_DEBOUNCE_MS = 2000
 const CHECK_IN_POLL_MS = 25000
-
-// Guards against submitting a recording that captured no speech. Whisper answers
-// silence with confident filler rather than an empty string, so an unchecked
-// clip becomes a wrong answer to the Question instead of a retry prompt.
-// Measured against real clips: silence peaks near zero while speech peaks well
-// above 0.1, even when the speaker is quiet or far from the microphone.
-const SPEECH_PEAK_THRESHOLD = 0.04
-const MIN_RECORDING_MS = 1000
-const MIN_TRANSCRIPT_CHARS = 2
 
 // Inferred labels are already human-readable; only the curated bank's own slug
 // needs prettifying (ADR 0023).
@@ -47,23 +40,25 @@ function App() {
   const [error, setError] = useState(null)
   const [stage, setStage] = useState(null) // intro | warm_up | done
   const [warmUpSource, setWarmUpSource] = useState(null) // resume | bank
-  const [resumeId, setResumeId] = useState(null)
-  const [resumeName, setResumeName] = useState('')
-  const [resumeStatus, setResumeStatus] = useState('none') // none | uploading | ready | failed
   const [dsa, setDsa] = useState(null) // DsaPayload for the current coding question
   const [code, setCode] = useState('')
   const [runReport, setRunReport] = useState(null)
   const [dsaSubmitted, setDsaSubmitted] = useState(false)
   const [running, setRunning] = useState(false)
-  const recorderRef = useRef(null)
   const chatEndRef = useRef(null)
-  const resumeUploadTokenRef = useRef(0)
   const statusRef = useRef(status)
   statusRef.current = status
 
   const { voices, voice, setVoice } = useVoices(setError)
   const apiReady = useApiReady()
   const { evaluation, evaluating, resetEvaluation } = useEvaluation({ phase, sessionId, onError: setError })
+  const { resumeId, resumeName, resumeStatus, handleResumeChange } = useResumeUpload({ onError: setError })
+  const { startRecording, stopRecording } = useRecorder({
+    sessionId,
+    setStatus,
+    onError: setError,
+    onTranscript: sendTranscript,
+  })
 
   // Keep the newest message in view, chat-app style (wireframe v1).
   useEffect(() => {
@@ -164,8 +159,6 @@ function App() {
     }
   }
 
-  // Deliberately does NOT reset resumeId/resumeName/resumeStatus: the uploaded
-  // resume stays valid for a second interview without re-uploading.
   function startNewInterview() {
     setScreen('start')
     setSessionId(null)
@@ -183,34 +176,6 @@ function App() {
     setDsaSubmitted(false)
     setFallbackOffer(null)
     setSessionDomain(null)
-  }
-
-  async function handleResumeChange(e) {
-    const file = e.target.files[0]
-    if (!file) return
-    const token = ++resumeUploadTokenRef.current
-    setResumeStatus('uploading')
-    setError(null)
-    try {
-      const form = new FormData()
-      form.append('file', file)
-      const resp = await fetch(api('/api/resume'), { method: 'POST', body: form })
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}))
-        throw new Error(body.detail || `resume upload failed (${resp.status})`)
-      }
-      const data = await resp.json()
-      if (token !== resumeUploadTokenRef.current) return // a newer upload superseded this one
-      setResumeId(data.resume_id)
-      setResumeName(file.name)
-      setResumeStatus('ready')
-    } catch (err) {
-      if (token !== resumeUploadTokenRef.current) return // a newer upload superseded this one
-      setResumeId(null)
-      setResumeName('')
-      setResumeStatus('failed')
-      setError(String(err))
-    }
   }
 
   // Every advancing response can move the interview onto (or off) a coding
@@ -299,96 +264,6 @@ function App() {
       setError(String(err))
       setStatus('idle')
     }
-  }
-
-  async function startRecording() {
-    setError(null)
-    let stream
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    } catch {
-      setError('Microphone permission denied — allow it in the address bar, or type below.')
-      return
-    }
-    const recorder = new MediaRecorder(stream)
-    const chunks = []
-
-    // Whisper hallucinates on silence rather than returning nothing - a recording
-    // that captured no speech comes back as confident filler ("Thank you.",
-    // "Maybe, maybe, maybe."), which then gets submitted as the Candidate's
-    // answer and derails the interview. So measure whether anyone actually
-    // spoke, and refuse to send the clip if not.
-    //
-    // Peak amplitude is measured directly rather than inferred from blob size:
-    // size depends on the browser's codec and bitrate, amplitude does not.
-    const audioCtx = new AudioContext()
-    const analyser = audioCtx.createAnalyser()
-    analyser.fftSize = 2048
-    audioCtx.createMediaStreamSource(stream).connect(analyser)
-    const samples = new Uint8Array(analyser.fftSize)
-    let peak = 0
-    const levelTimer = setInterval(() => {
-      analyser.getByteTimeDomainData(samples)
-      for (let i = 0; i < samples.length; i++) {
-        const amplitude = Math.abs(samples[i] - 128) / 128
-        if (amplitude > peak) peak = amplitude
-      }
-    }, 100)
-    const startedAt = Date.now()
-
-    recorder.ondataavailable = (e) => chunks.push(e.data)
-    recorder.onstop = async () => {
-      clearInterval(levelTimer)
-      audioCtx.close().catch(() => {})
-      stream.getTracks().forEach((t) => t.stop())
-
-      const heardSpeech = peak >= SPEECH_PEAK_THRESHOLD
-      const longEnough = Date.now() - startedAt >= MIN_RECORDING_MS
-      if (!heardSpeech || !longEnough) {
-        setError(
-          longEnough
-            ? "I didn't catch that — check your microphone, or type your answer below."
-            : "That recording was too short — hold it a moment longer, or type your answer below."
-        )
-        setStatus('idle')
-        return
-      }
-
-      setStatus('transcribing')
-      try {
-        const blob = new Blob(chunks, { type: recorder.mimeType })
-        const form = new FormData()
-        form.append('file', blob, 'answer.webm')
-        // Lets the backend prime Whisper with this Session's resume vocabulary
-        // so names and project titles survive transcription (ADR 0026). The
-        // digest stays server-side; only the id the client already has is sent.
-        if (sessionId) form.append('session_id', sessionId)
-        const resp = await fetch(api('/api/transcribe'), { method: 'POST', body: form })
-        if (!resp.ok) {
-          const body = await resp.json().catch(() => ({}))
-          throw new Error(body.detail || `transcription failed (${resp.status})`)
-        }
-        const data = await resp.json()
-        // Even with speech present Whisper can return nothing usable; submitting
-        // that would answer the Question with noise.
-        if (!data.transcript || data.transcript.trim().length < MIN_TRANSCRIPT_CHARS) {
-          setError("I didn't catch that — try again, or type your answer below.")
-          setStatus('idle')
-          return
-        }
-        await sendTranscript(data.transcript)
-      } catch (err) {
-        setError(String(err))
-        setStatus('idle')
-      }
-    }
-    recorderRef.current = recorder
-    recorder.start()
-    setStatus('recording')
-  }
-
-  function stopRecording() {
-    recorderRef.current?.stop()
   }
 
   function handleTextSubmit(e) {
