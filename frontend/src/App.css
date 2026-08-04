@@ -185,7 +185,22 @@
 
 .resume-drop:hover { border-color: var(--text-dim); }
 
-.resume-drop input { display: none; }
+/* Visually hidden, NOT display:none - the input must stay in the tab order or
+   keyboard users cannot open the file picker at all. The visible focus ring
+   moves to the wrapping label via :focus-within. */
+.resume-drop input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.resume-drop:focus-within {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+  border-color: var(--text-dim);
+}
 
 .fallback-offer {
   display: flex;
