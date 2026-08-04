@@ -235,7 +235,9 @@ describe('App', () => {
     render(<App />)
     await userEvent.click(await screen.findByRole('button', { name: /start interview/i }))
     expect(await screen.findByText('Tell me about yourself.')).toBeInTheDocument()
-    expect(screen.getByText('INTERVIEWER')).toBeInTheDocument()
+    // The label is uppercased by CSS (text-transform), not in the DOM, and the
+    // test environment runs with css: false.
+    expect(screen.getByText('Interviewer')).toBeInTheDocument()
   })
 
   it('rolls the transcript back when an answer fails, leaving no orphan turn', async () => {
