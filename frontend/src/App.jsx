@@ -7,6 +7,9 @@ import { Composer } from './components/Composer'
 import { StartScreen } from './components/StartScreen'
 import { CodingWorkspace } from './components/CodingWorkspace'
 import { Evaluation } from './components/Evaluation'
+import { useVoices } from './hooks/useVoices'
+import { useApiReady } from './hooks/useApiReady'
+import { useEvaluation } from './hooks/useEvaluation'
 import './App.css'
 import mark from './assets/mark.svg'
 
@@ -42,10 +45,6 @@ function App() {
   const [draft, setDraft] = useState('')
   const [latencyMs, setLatencyMs] = useState(null)
   const [error, setError] = useState(null)
-  const [voices, setVoices] = useState({})
-  const [voice, setVoice] = useState('')
-  const [evaluation, setEvaluation] = useState(null)
-  const [evaluating, setEvaluating] = useState(false)
   const [stage, setStage] = useState(null) // intro | warm_up | done
   const [warmUpSource, setWarmUpSource] = useState(null) // resume | bank
   const [resumeId, setResumeId] = useState(null)
@@ -56,68 +55,20 @@ function App() {
   const [runReport, setRunReport] = useState(null)
   const [dsaSubmitted, setDsaSubmitted] = useState(false)
   const [running, setRunning] = useState(false)
-  const [apiReady, setApiReady] = useState(false)
   const recorderRef = useRef(null)
   const chatEndRef = useRef(null)
   const resumeUploadTokenRef = useRef(0)
   const statusRef = useRef(status)
   statusRef.current = status
 
-  useEffect(() => {
-    fetch(api('/api/voices'))
-      .then((r) => r.json())
-      .then((data) => {
-        setVoices(data.voices)
-        setVoice(data.default)
-      })
-      .catch(() => setError('backend not reachable — is it running on port 8000?'))
-  }, [])
-
-  // A free-tier API container sleeps when idle and takes ~30-60s to wake
-  // (ADR 0025). Ping it as soon as the start screen renders so it boots while
-  // the Candidate reads and picks a resume, not after they click Start.
-  //
-  // Deliberately no timeout: aborting would kill a request that was going to
-  // succeed. The wait is fine; leaving the Candidate to guess is not, so the
-  // result is tracked and shown.
-  //
-  // Only a 2xx counts as awake. fetch() resolves for 5xx as well, so a plain
-  // .then() would clear the notice on the 502/503 a platform serves *while*
-  // the container is still starting - exactly when the notice is wanted. A
-  // failure leaves the notice up, which reads as "still waking" and is the
-  // honest thing to show when the API is not answering.
-  useEffect(() => {
-    fetch(api('/api/health'))
-      .then((r) => {
-        if (r.ok) setApiReady(true)
-      })
-      .catch(() => {})
-  }, [])
+  const { voices, voice, setVoice } = useVoices(setError)
+  const apiReady = useApiReady()
+  const { evaluation, evaluating, resetEvaluation } = useEvaluation({ phase, sessionId, onError: setError })
 
   // Keep the newest message in view, chat-app style (wireframe v1).
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [history, status])
-
-  // The Evaluation only exists once the Session is done.
-  useEffect(() => {
-    if (phase !== 'done' || !sessionId) return
-    const controller = new AbortController()
-    setEvaluating(true)
-    fetch(api(`/api/session/${sessionId}/evaluation`), { signal: controller.signal })
-      .then((r) => {
-        if (!r.ok) throw new Error(`evaluation failed (${r.status})`)
-        return r.json()
-      })
-      .then(setEvaluation)
-      .catch((err) => {
-        if (err.name !== 'AbortError') setError(String(err))
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setEvaluating(false)
-      })
-    return () => controller.abort()
-  }, [phase, sessionId])
 
   // Snapshot on a typing pause (ADR 0018). Fire-and-forget: a lost snapshot
   // just means the watcher sees slightly older code. Skip the untouched
@@ -224,8 +175,6 @@ function App() {
     setTotalQuestions(null)
     setError(null)
     setStatus('idle')
-    setEvaluation(null)
-    setEvaluating(false)
     setStage(null)
     setWarmUpSource(null)
     setDsa(null)
@@ -516,7 +465,13 @@ function App() {
 
         {done ? (
           <div className="composer">
-            <button type="button" onClick={startNewInterview}>
+            <button
+              type="button"
+              onClick={() => {
+                startNewInterview()
+                resetEvaluation()
+              }}
+            >
               Start new interview
             </button>
           </div>
