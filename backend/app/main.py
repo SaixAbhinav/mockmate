@@ -40,6 +40,7 @@ from .providers import ProviderError, ProviderUnavailableError, get_provider
 from .questions import FALLBACK_DOMAIN
 from .resume import ResumeError, extract_resume_text, vocabulary_digest
 from .runner import RunResult, run_tests, summarize_run
+from .secrets import load_secrets_from_ssm
 from .session_store import get_store
 from .stt import SttUnavailableError, transcribe
 from .tts import DEFAULT_VOICE, VOICES, synthesize
@@ -54,6 +55,10 @@ from .watcher import (
 )
 
 load_dotenv()
+# On Lambda (LOAD_SECRETS_FROM_SSM=1, infra/lambda.tf) this fills in
+# GROQ_API_KEY/GEMINI_API_KEY from SSM; everywhere else (local .env, Render)
+# it's a no-op (ADR 0029).
+load_secrets_from_ssm()
 
 def _log_level() -> int:
     """Resolve LOG_LEVEL, tolerating case and nonsense.

@@ -1,6 +1,6 @@
 # ADR 0025: Deploy on Render as a static SPA plus a single API container
 
-Date: 2026-07-24 · Amended: 2026-07-25 · Accepted: 2026-07-25 · Status: accepted
+Date: 2026-07-24 · Amended: 2026-07-25 · Accepted: 2026-07-25 · Status: accepted · host superseded by [0029](0029-serverless-aws-deploy.md)
 
 ## Context
 
@@ -170,3 +170,13 @@ community forum was unreachable. Every meaningful call here is a POST, so the
 first live résumé upload is the real test — and the `VITE_API_BASE` /
 `CORS_ORIGINS` fallback exists so the answer costs two environment variables
 rather than a redesign.
+
+**Host superseded by [ADR 0029](0029-serverless-aws-deploy.md).** The
+serverless AWS deploy is taking over the host: the backend (API
+Gateway/Lambda/DynamoDB/SSM) is already live, and the CloudFront/S3 frontend
+flips over once its account-verification step clears (pending at time of
+writing) — replacing this ADR's two Render services. This ADR's
+app-level decisions (the single-origin rewrite property, the runner's
+accepted soft-sandbox risk, the landing-page cold-start mitigation) carried
+straight over and still describe real, if now superseded, reasoning; kept
+here for history and as the documented fallback 0029 names.

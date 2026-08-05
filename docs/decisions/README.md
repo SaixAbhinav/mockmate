@@ -42,18 +42,17 @@ index that drifts from the ADRs is worse than no index.
 | [0021](0021-session-store-interface.md) | Session store — the interface 0007 promised | accepted |
 | [0023](0023-resume-driven-domain.md) | The résumé decides the domain | accepted |
 | [0024](0024-offline-question-generation.md) | Generate banks offline, gate by machine, review by hand | accepted |
-| [0025](0025-deploy-render-static-plus-api.md) | Deploy on Render as a static SPA plus a single API container | accepted |
+| [0025](0025-deploy-render-static-plus-api.md) | Deploy on Render as a static SPA plus a single API container | accepted · host superseded by [0029](0029-serverless-aws-deploy.md) |
 | [0026](0026-stt-resume-prompt.md) | Bias transcription with a résumé-derived vocabulary digest | accepted |
 | [0027](0027-check-in-policy-owns-its-state.md) | The check-in policy owns its own state | accepted · amends [0018](0018-watching-interviewer-check-ins.md) |
 | [0028](0028-a-reply-starts-the-watcher-cooldown.md) | A chat reply starts the Watcher's cooldown | accepted · amends [0019](0019-voice-live-while-coding.md) |
-| [0030](0030-callback-rename-and-visual-system.md) | Callback — rename, and a monochrome visual system | accepted |
+| [0029](0029-serverless-aws-deploy.md) | Serverless AWS deploy — Terraform IaC and idempotent state at scale | accepted · shipped · supersedes [0025](0025-deploy-render-static-plus-api.md)'s host |
 
 ## Open — decided direction, not yet closed out
 
 | # | Title | Status | Where it stands |
 |---|---|---|---|
 | [0022](0022-weak-area-targeting.md) | Weak-area targeting | deferred | Deferred for v1: no users yet, value unproven, and it forces either the full accounts day (0009) or an identity model that contradicts it. Analysis kept; revisit when real usage demands it. |
-| [0029](0029-serverless-aws-deploy.md) | Serverless AWS deploy — Terraform IaC and idempotent state at scale | accepted · building (5 PRs) | Serverless AWS deploy defined in Terraform with an OIDC CI/CD pipeline, optimised for demonstrable cloud competence within a near-free (~$0/mo) bound rather than for cost alone: CloudFront → {S3, API Gateway HTTP API} → Lambda (FastAPI via Web Adapter) → DynamoDB. Headline features: everything in Terraform, and replacing the in-process `_evaluation_locks` with a DynamoDB conditional write so evaluation is idempotent under horizontal scale (Race A). Watcher-poll last-writer-wins (Race B) is deliberately deferred. Shipping backend-state PR first. Supersedes [0025](0025-deploy-render-static-plus-api.md)'s host on cutover (PR 3). |
 
 ## Not yet ADRs — parked threads
 
