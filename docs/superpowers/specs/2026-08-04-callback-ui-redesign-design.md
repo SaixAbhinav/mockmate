@@ -243,10 +243,28 @@ ADR 0030. Visible, self-contained, no behaviour change.
 **PR 2 — Component and hook extraction.** The `App.jsx` split, plus the Vitest setup and
 hook tests. Pure refactor; no visual change beyond what PR 1 established.
 
-**PR 3 — Coding round.** `DsaPayload.prompt` and its backend test, `CodingWorkspace`,
-`InterviewerRail`, the wide layout mode, the run-results table.
+**PR 3 — Coding round, and the coverage gaps PR 2 left open.** `DsaPayload.prompt` and its
+backend test, `CodingWorkspace`, `InterviewerRail`, the wide layout mode, the run-results
+table.
 
-Each is a feature branch off `main` with its own PR.
+PR 2's final review produced an honest list of untested paths, concentrated in the seams that
+refactor introduced. Closing them is PR 3 scope, decided after PR 2 opened:
+
+- `useResumeUpload` — no tests at all, including the supersede-token race that stops a slow
+  first upload overwriting a faster second one
+- starting an interview *with* a résumé (the `resume_id` payload path)
+- the 409 fallback-offer path end to end (ADR 0023)
+- a *successful* text answer — `applyProgress` and the latency measurement
+- entering the coding round — `onNewQuestion` and the ADR 0019 same-question guard
+- `runCode`
+- the transition to `done` and the evaluation fetch — `useEvaluation` has no tests
+- "Start new interview", including the deliberate non-reset of the uploaded résumé
+- `useVoices`, `useApiReady`
+- the `onTranscript` join between `useRecorder` and `useSession`
+- component tests beyond `Transcript`
+
+Each is a feature branch with its own PR. PRs 2 and 3 stack on their predecessor while it is
+still open, and GitHub retargets them to `main` as each merges.
 
 ---
 
