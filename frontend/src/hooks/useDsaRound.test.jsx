@@ -127,6 +127,71 @@ describe('useDsaRound', () => {
     expect(playAudio).not.toHaveBeenCalled()
   })
 
+  it('keeps the run report from runCode and never advances the interview', async () => {
+    const report = {
+      status: 'ok',
+      passed: 1,
+      total: 2,
+      results: [{ args: [[1, 2]], expected: [1, 3], got: '[1, 2]', passed: false }],
+    }
+    mocks.respond('/dsa/run', report)
+    const { result, applySubmitProgress, appendAssistant } = setup()
+
+    await act(async () => {
+      await result.current.runCode()
+    })
+
+    expect(result.current.runReport).toEqual(report)
+    expect(result.current.running).toBe(false)
+    // Running tests is not a Submission (ADR 0017) - nothing moves.
+    expect(applySubmitProgress).not.toHaveBeenCalled()
+    expect(appendAssistant).not.toHaveBeenCalled()
+    expect(result.current.dsaSubmitted).toBe(false)
+  })
+
+  it('sends the current code to the runner', async () => {
+    mocks.respond('/dsa/run', { status: 'ok', passed: 0, total: 0, results: [] })
+    const { result } = setup()
+    const typed = dsa.starter_code + '    return []\n'
+    act(() => result.current.setCode(typed))
+
+    await act(async () => {
+      await result.current.runCode()
+    })
+
+    const call = mocks.calls.find((c) => c.path.includes('/dsa/run'))
+    expect(JSON.parse(call.init.body).code).toBe(typed)
+  })
+
+  it('surfaces a failed run and clears the running flag', async () => {
+    mocks.respond('/dsa/run', {}, false, 500)
+    const { result, onError } = setup()
+
+    await act(async () => {
+      await result.current.runCode()
+    })
+
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('500'))
+    expect(result.current.running).toBe(false)
+    expect(result.current.runReport).toBeNull()
+  })
+
+  it('clears the previous report when a new question starts', async () => {
+    mocks.respond('/dsa/run', { status: 'ok', passed: 1, total: 1, results: [] })
+    const { result } = setup()
+    await act(async () => {
+      await result.current.runCode()
+    })
+    expect(result.current.runReport).not.toBeNull()
+
+    const next = { ...dsa, starter_code: 'def other():\n    pass\n' }
+    act(() => result.current.startQuestion(next))
+
+    expect(result.current.runReport).toBeNull()
+    expect(result.current.code).toBe(next.starter_code)
+    expect(result.current.dsaSubmitted).toBe(false)
+  })
+
   it('wires submitCode through to applySubmitProgress, appendAssistant, and dsaSubmitted', async () => {
     const submitBody = {
       run: { passed: true },
