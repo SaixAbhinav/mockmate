@@ -562,7 +562,21 @@ def _reach_dsa(client, monkeypatch):
     assert data["stage"] == "dsa"
     assert data["dsa"]["function_name"] == "echo"
     assert data["dsa"]["starter_code"]
+    assert data["dsa"]["prompt"] == ECHO_DSA_QUESTION.question
     return session_id
+
+
+def test_dsa_payload_carries_the_question_prompt(client, monkeypatch):
+    """The editor pins the question above the code, so the payload has to carry
+    the text and not just the signature. It must survive a coding-round side
+    chat too (ADR 0019), since that is a second payload construction site."""
+    session_id = _reach_dsa(client, monkeypatch)
+
+    resp = client.post(
+        f"/api/session/{session_id}/answer", json={"transcript": "Can the input be empty?"}
+    )
+
+    assert resp.json()["dsa"]["prompt"] == ECHO_DSA_QUESTION.question
 
 
 def test_run_executes_code_against_the_test_cases(client, monkeypatch):
