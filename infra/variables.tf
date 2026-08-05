@@ -18,3 +18,14 @@ variable "ecr_untagged_image_expiry_days" {
   type        = number
   default     = 14
 }
+
+variable "image_tag" {
+  description = <<-EOT
+    Tag (within the ecr.tf repository) of the backend image the Lambda
+    function (lambda.tf) runs. The user pushes the image first, then
+    `terraform apply` - see infra/README.md's deploy runbook. Defaults to
+    "latest"; pass a specific tag/digest-derived tag to pin a release.
+  EOT
+  type        = string
+  default     = "latest"
+}
