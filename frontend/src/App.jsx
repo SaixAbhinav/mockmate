@@ -3,6 +3,8 @@ import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { api } from './api'
 import './App.css'
+import heroArt from './assets/hero-art.png'
+import mark from './assets/mark.svg'
 
 // The watching interviewer (ADR 0018): snapshot on a typing pause; poll for
 // check-ins. The backend owns the real policy (offer, interval, cooldowns,
@@ -22,6 +24,26 @@ const MIN_TRANSCRIPT_CHARS = 2
 // Inferred labels are already human-readable; only the curated bank's own slug
 // needs prettifying (ADR 0023).
 const DOMAIN_LABELS = { ml_genai: 'ML / GenAI' }
+
+// Scores are 1-5; a bar reads faster than a number in a pill.
+function ScoreRow({ label, value }) {
+  return (
+    <div className="score-row">
+      <span>{label}</span>
+      <span
+        className="score-bar"
+        role="meter"
+        aria-valuemin={0}
+        aria-valuemax={5}
+        aria-valuenow={value ?? 0}
+        aria-label={label}
+      >
+        <span style={{ width: `${((value ?? 0) / 5) * 100}%` }} />
+      </span>
+      <span>{value ?? '—'}</span>
+    </div>
+  )
+}
 
 function App() {
   const [screen, setScreen] = useState('start') // start | interview
@@ -259,6 +281,7 @@ function App() {
     } catch (err) {
       if (token !== resumeUploadTokenRef.current) return // a newer upload superseded this one
       setResumeId(null)
+      setResumeName('')
       setResumeStatus('failed')
       setError(String(err))
     }
@@ -452,20 +475,42 @@ function App() {
     return (
       <main className="wrap">
         <header className="topbar">
-          <h1>MockMate</h1>
+          <div className="brand">
+            <span className="brand-name">Callback</span>
+            <img className="brand-mark" src={mark} alt="" aria-hidden="true" />
+            <span className="brand-tag">voice interview practice, in the open</span>
+          </div>
         </header>
+
+        {error && (
+          <div className="banner">
+            <span>{error}</span>
+            <button type="button" onClick={() => setError(null)} aria-label="Dismiss">
+              ✕
+            </button>
+          </div>
+        )}
+
         <div className="landing">
-          <p className="lede">
-            A voice-based AI mock interviewer. Upload a résumé and it builds an
-            interview around it — an intro, a résumé-grounded warm-up, then two
-            sandboxed Python questions with an interviewer watching as you type.
-            You get a scored evaluation at the end.
-          </p>
+          <section className="hero">
+            <img className="hero-art" src={heroArt} alt="" aria-hidden="true" />
+            <div className="hero-body">
+              <p className="kicker">Open source · self-hostable</p>
+              <h1>Sit the interview before it counts.</h1>
+              <p className="lede">
+                Upload a résumé and Callback builds an interview around it — an intro, a
+                résumé-grounded warm-up, then two sandboxed Python questions with an
+                interviewer watching as you type. You leave with a scored evaluation.
+              </p>
+            </div>
+          </section>
+
           <ol className="landing-steps">
-            <li>Upload a résumé (optional — skip it for a general ML/GenAI interview)</li>
-            <li>Answer out loud; the interviewer probes your answers</li>
+            <li>Upload a résumé — optional, skip it for a general ML/GenAI interview</li>
+            <li>Answer out loud; the interviewer probes what you say</li>
             <li>Solve two coding questions, then read your scored evaluation</li>
           </ol>
+
           <p className="hint">
             Built in the open —{' '}
             <a href="https://github.com/SaixAbhinav/mockmate" target="_blank" rel="noreferrer">
@@ -473,41 +518,38 @@ function App() {
             </a>
             .
           </p>
-          {!apiReady && (
-            <p className="hint waking">
-              Waking the interviewer — the first visit can take up to a minute.
-              Go ahead and pick a résumé meanwhile.
-            </p>
-          )}
         </div>
+
         <section className="start-panel">
-          <label className="voice-row">
-            Resume:
+          <label className="resume-drop">
+            <strong>{resumeName || 'Choose a résumé'}</strong>
+            <span className="hint">
+              {resumeStatus === 'uploading'
+                ? 'Uploading…'
+                : resumeStatus === 'ready'
+                  ? 'Your interview will be built around this file'
+                  : resumeStatus === 'failed'
+                    ? 'That file could not be read — try another, or skip for a general ML/GenAI interview.'
+                    : 'PDF or .txt — or skip for a general ML/GenAI interview'}
+            </span>
             <input type="file" accept=".pdf,.txt" onChange={handleResumeChange} />
           </label>
-          {resumeStatus === 'uploading' && <p className="hint">Uploading resume…</p>}
-          {resumeStatus === 'ready' && (
-            <p className="hint">Your interview will be built around {resumeName}</p>
-          )}
-          {!resumeId && resumeStatus !== 'uploading' && (
-            <p className="hint">
-              No resume — this will be a general ML/GenAI interview.
-            </p>
-          )}
 
           {fallbackOffer ? (
             <div className="fallback-offer">
               <p>{fallbackOffer.message}</p>
-              <button onClick={() => startInterview(true)} disabled={status === 'thinking'}>
-                Start the general interview
-              </button>
-              <button
-                className="secondary"
-                onClick={() => setFallbackOffer(null)}
-                disabled={status === 'thinking'}
-              >
-                Cancel
-              </button>
+              <div className="dsa-actions">
+                <button onClick={() => startInterview(true)} disabled={status === 'thinking'}>
+                  Start the general interview
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => setFallbackOffer(null)}
+                  disabled={status === 'thinking'}
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           ) : (
             <button
@@ -515,12 +557,19 @@ function App() {
               disabled={status === 'thinking' || resumeStatus === 'uploading'}
             >
               {status === 'thinking'
-                ? (resumeId ? 'Reading your resume…' : 'Starting…')
-                : 'Start interview'}
+                ? (resumeId ? 'Reading your résumé…' : 'Starting…')
+                : !apiReady
+                  ? 'Start interview — waking the interviewer'
+                  : 'Start interview'}
             </button>
           )}
+          {!apiReady && (
+            <p className="hint">
+              The first visit can take up to a minute to wake — go ahead and pick a résumé
+              meanwhile.
+            </p>
+          )}
         </section>
-        {error && <p className="error">{error}</p>}
       </main>
     )
   }
@@ -536,7 +585,11 @@ function App() {
   return (
     <main className="wrap">
       <header className="topbar">
-        <h1>MockMate</h1>
+        <div className="brand">
+          <span className="brand-name">Callback</span>
+          <img className="brand-mark" src={mark} alt="" aria-hidden="true" />
+          {progressLabel && <span className="progress">{progressLabel}</span>}
+        </div>
         <div className="controls">
           <label className="voice-row">
             Voice:
@@ -546,11 +599,23 @@ function App() {
               ))}
             </select>
           </label>
-          <span className={`status status-${status}`}>{status}</span>
-          {progressLabel && <span className="progress">{progressLabel}</span>}
-          {latencyMs !== null && <span className="latency">last turn: {latencyMs} ms</span>}
+          <span
+            className={`status status-${status}`}
+            title={latencyMs !== null ? `last turn: ${latencyMs} ms` : undefined}
+          >
+            {status}
+          </span>
         </div>
       </header>
+
+      {error && (
+        <div className="banner">
+          <span>{error}</span>
+          <button type="button" onClick={() => setError(null)} aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      )}
 
       {resumeId && warmUpSource === 'bank' && (
         <p className="hint">
@@ -564,12 +629,13 @@ function App() {
       <section className="chat">
         <div className="messages">
           {history.map((m, i) => (
-            <p
+            <div
               key={i}
-              className={done && i === history.length - 1 ? 'wrap-up' : m.role}
+              className={`turn ${m.role}${done && i === history.length - 1 ? ' wrap-up' : ''}`}
             >
-              <strong>{m.role === 'user' ? 'You' : 'Interviewer'}:</strong> {m.content}
-            </p>
+              <span className="turn-label">{m.role === 'user' ? 'You' : 'Interviewer'}</span>
+              <p className="turn-text">{m.content}</p>
+            </div>
           ))}
           {(status === 'thinking' || status === 'transcribing') && (
             <p className="hint">{status}…</p>
@@ -609,16 +675,16 @@ function App() {
                 {runReport && (
                   <div className="dsa-results">
                     {runReport.status === 'ok' ? (
-                      <p>
-                        <strong>{runReport.passed}</strong> of {runReport.total} test cases passed
+                      <p className={runReport.passed === runReport.total ? 'passed' : 'failed'}>
+                        {runReport.passed} of {runReport.total} test cases passed
                       </p>
                     ) : (
-                      <p className="error">{runReport.error}</p>
+                      <p className="failed">{runReport.error}</p>
                     )}
                     {runReport.results.filter((r) => !r.passed).map((r, i) => (
                       <p key={i} className="dsa-fail">
-                        args: <code>{JSON.stringify(r.args)}</code> · expected{' '}
-                        <code>{JSON.stringify(r.expected)}</code> · got <code>{r.got}</code>
+                        <code>{JSON.stringify(r.args)}</code> → expected{' '}
+                        <code>{JSON.stringify(r.expected)}</code>, got <code>{r.got}</code>
                       </p>
                     ))}
                   </div>
@@ -663,17 +729,12 @@ function App() {
           <h2>How you did</h2>
           <p className="evaluation-assessment">{evaluation.assessment}</p>
 
-          <div className="chips">
-            <span className="score-chip coverage">
-              answered <strong>{evaluation.coverage.answered}</strong> of{' '}
-              {evaluation.coverage.total}
-            </span>
-            {Object.entries(evaluation.averages).map(([dimension, value]) => (
-              <span key={dimension} className="score-chip">
-                {dimension}: <strong>{value ?? '—'}</strong>/5
-              </span>
-            ))}
-          </div>
+          <p className="hint">
+            answered {evaluation.coverage.answered} of {evaluation.coverage.total}
+          </p>
+          {Object.entries(evaluation.averages).map(([dimension, value]) => (
+            <ScoreRow key={dimension} label={dimension} value={value} />
+          ))}
 
           {evaluation.strengths.length > 0 && (
             <>
@@ -699,11 +760,9 @@ function App() {
                 <p className="hint">Couldn't be scored</p>
               ) : (
                 <>
-                  <div className="chips">
-                    <span className="score-chip">correctness: <strong>{q.correctness}</strong>/5</span>
-                    <span className="score-chip">depth: <strong>{q.depth}</strong>/5</span>
-                    <span className="score-chip">clarity: <strong>{q.clarity}</strong>/5</span>
-                  </div>
+                  <ScoreRow label="correctness" value={q.correctness} />
+                  <ScoreRow label="depth" value={q.depth} />
+                  <ScoreRow label="clarity" value={q.clarity} />
                   <p>{q.comment}</p>
                 </>
               )}
@@ -713,38 +772,28 @@ function App() {
           {evaluation.dsa && evaluation.dsa.questions.length > 0 && (
             <>
               <h3>Coding round</h3>
-              <div className="chips">
-                {Object.entries(evaluation.dsa.averages).map(([dimension, value]) => (
-                  <span key={dimension} className="score-chip">
-                    {dimension.replace('_', ' ')}: <strong>{value ?? '—'}</strong>/5
-                  </span>
-                ))}
-                <span className="score-chip coverage">
-                  hints used <strong>{evaluation.dsa.hints_used}</strong>
-                </span>
-              </div>
+              {Object.entries(evaluation.dsa.averages).map(([dimension, value]) => (
+                <ScoreRow key={dimension} label={dimension.replace('_', ' ')} value={value} />
+              ))}
+              <p className="hint">hints used: {evaluation.dsa.hints_used}</p>
               {evaluation.dsa.questions.map((q, i) => (
                 <div key={i} className="evaluation-question">
                   <p className="evaluation-question-text">{q.question}</p>
                   {q.skipped ? (
                     <p className="hint">Never submitted</p>
                   ) : (
-                    <div className="chips">
-                      <span className="score-chip coverage">
-                        tests: <strong>{q.tests.passed}</strong>/{q.tests.total}
+                    <>
+                      <p className={q.tests.passed === q.tests.total ? 'passed' : 'failed'}>
+                        tests: {q.tests.passed}/{q.tests.total}
                         {q.tests.status !== 'ok' && ` (${q.tests.status})`}
-                      </span>
+                      </p>
                       {!q.unscored && (
                         <>
-                          <span className="score-chip">
-                            code quality: <strong>{q.code_quality}</strong>/5
-                          </span>
-                          <span className="score-chip">
-                            approach: <strong>{q.approach}</strong>/5
-                          </span>
+                          <ScoreRow label="code quality" value={q.code_quality} />
+                          <ScoreRow label="approach" value={q.approach} />
                         </>
                       )}
-                    </div>
+                    </>
                   )}
                   {q.unscored && <p className="hint">The code itself couldn't be scored</p>}
                   {q.comment && <p>{q.comment}</p>}
@@ -760,7 +809,6 @@ function App() {
         </section>
       )}
 
-      {error && <p className="error">{error}</p>}
     </main>
   )
 }

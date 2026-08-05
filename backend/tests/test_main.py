@@ -986,3 +986,11 @@ def test_the_capped_redirect_also_silences_the_watcher(client, monkeypatch):
 
     clock.advance(INTERJECTION_COOLDOWN_SECONDS)
     assert _check_in(client, session_id).json()["action"] == "hint"
+
+
+def test_api_advertises_the_product_name():
+    """The rename is display-only (ADR 0030), and this is the one place the API
+    shows a name to a human - the generated /docs page."""
+    from app.main import app
+
+    assert app.title == "Callback"

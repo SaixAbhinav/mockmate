@@ -8,6 +8,9 @@ CONTEXT.md
 docs/ai-context/
 memory/
 
+# Brainstorming companion scratch (superpowers) — local only.
+.superpowers/
+
 # --- Secrets ---
 .env
 .env.*

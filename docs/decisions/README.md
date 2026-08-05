@@ -1,6 +1,6 @@
 # Decision index
 
-The single roll-up of every architectural decision in MockMate — what's decided,
+The single roll-up of every architectural decision in Callback — what's decided,
 what's still open, and where the open ones stand. Each row's `Status` mirrors the
 `Status:` line inside that ADR; this table is the at-a-glance view, the ADR file
 is the detail.
