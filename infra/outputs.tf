@@ -54,3 +54,14 @@ output "cloudfront_distribution_id" {
   description = "CloudFront distribution id - pass to `aws cloudfront create-invalidation --distribution-id <this> --paths \"/*\"` after each frontend redeploy."
   value       = aws_cloudfront_distribution.frontend.id
 }
+
+# PR 5's outputs (cloudwatch.tf) - see infra/README.md's Monitoring section.
+output "sns_alerts_topic_arn" {
+  description = "SNS topic ARN that every CloudWatch alarm notifies. No email subscription is created by Terraform - subscribe with `aws sns subscribe --topic-arn <this> --protocol email --notification-endpoint you@example.com` and confirm the email (see README)."
+  value       = aws_sns_topic.alerts.arn
+}
+
+output "cloudwatch_dashboard_url" {
+  description = "Console URL for the mockmate CloudWatch dashboard (Lambda/API Gateway/DynamoDB/CloudFront at a glance)."
+  value       = "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards/dashboard/${aws_cloudwatch_dashboard.mockmate.dashboard_name}"
+}

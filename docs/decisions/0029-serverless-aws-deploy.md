@@ -1,6 +1,6 @@
 # ADR 0029: Serverless AWS deploy — Terraform IaC and idempotent state at scale
 
-Date: 2026-07-29 · Status: accepted (building, 5 PRs) · Supersedes [0025](0025-deploy-render-static-plus-api.md)'s host on cutover
+Date: 2026-07-29 · Status: accepted · shipped · Supersedes [0025](0025-deploy-render-static-plus-api.md)'s host on cutover
 
 ## Context
 
@@ -232,9 +232,9 @@ writes to make evaluation idempotent under horizontal scale."*
 
 ## Status
 
-Accepted; being implemented as **five scoped PRs**, matching the DSA round's
-~5-PR precedent, backend-state first so the headline lands independent of any AWS
-deploy:
+Accepted; shipping as the **five scoped PRs** below, matching the DSA round's
+~5-PR precedent, backend-state first so the headline landed independent of any
+AWS deploy:
 
 1. `DynamoDBSessionStore` + the **Race A** idempotency guard — pure backend,
    tested against DynamoDB Local, ships without touching AWS deploy. The
@@ -246,7 +246,30 @@ deploy:
 3. S3 + CloudFront + frontend deploy + single-origin routing (and the streaming
    check above).
 4. GitHub Actions OIDC pipeline (`plan` on PR, `apply` on merge).
-5. CloudWatch dashboard/alarms + README/deploy docs.
+5. CloudWatch dashboard/alarms + README/deploy docs (this PR).
 
-**Supersession of ADR 0025's host takes effect on cutover** — when PR 3 makes the
-AWS deploy live. Until then 0025 remains the live deploy and both ADRs stand.
+**Live now**, confirmed via infra/README.md's smoke test: the backend — Lambda,
+API Gateway, DynamoDB, and SSM Parameter Store — answers `/api/health` with both
+provider keys loaded from SSM.
+
+**The CloudFront/S3 frontend (PR 3) is written and reviewed but not yet applied:**
+new AWS accounts must be verified by AWS Support before they can create CloudFront
+distributions, and that request is pending. So the supersession of ADR 0025's host
+is **in progress, not complete** — the backend host is already AWS; the frontend
+host flips to CloudFront once verification clears. See
+[0025](0025-deploy-render-static-plus-api.md)'s Status for its side of this.
+
+**Consciously deferred, not forgotten:**
+
+- **Race B** — Watcher-poll last-writer-wins, per the Decision section above.
+  Bounded to near-impossible by ADR 0028's idle gating; the named
+  optimistic-concurrency (`version` attribute) upgrade is the fix if usage
+  ever demands it.
+- **A separate, lower-privilege CI plan role.** PR 4's OIDC pipeline (written,
+  not yet merged) runs `plan` and `apply` under one role; splitting a read-only
+  `plan` role from the mutating `apply` role is real hardening this ADR didn't
+  need to block cutover on.
+- **Least-privilege tightening of the deploy role.** The role Terraform
+  applies as is scoped to this project's resources but not yet audited down
+  to the minimum action set the way `iam.tf`'s Lambda execution role already
+  is — a later hardening pass, not a known hole.
