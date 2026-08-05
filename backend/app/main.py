@@ -166,6 +166,10 @@ MAX_CODE_CHARS = 10_000  # a coding-exercise solution, not a novel (TPM guard, A
 class DsaPayload(BaseModel):
     """What the editor needs to render a DSA question."""
 
+    # `prompt` is the same text the interviewer speaks, so the editor can pin
+    # the question above the code instead of making the candidate scroll the
+    # transcript back to it. The spoken turn stays in history deliberately.
+    prompt: str
     function_name: str
     signature: str
     starter_code: str
@@ -327,6 +331,7 @@ def _dsa_payload(state: InterviewState) -> DsaPayload | None:
     ):
         return None
     return DsaPayload(
+        prompt=question["question"],
         function_name=question["function_name"],
         signature=question["signature"],
         starter_code=question["starter_code"],

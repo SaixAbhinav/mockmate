@@ -13,9 +13,13 @@
   box-sizing: border-box;
 }
 
-/* PR 3 widens the page for the coding round by adding this class. Defined now
-   so the layout mode exists before the round is rebuilt. */
-.wrap--wide { max-width: 1140px; }
+/* The coding round widens the page and pins it to the viewport, so the editor,
+   the report and the rail scroll inside their own panes and the composer never
+   leaves the screen. Below 900px the panes stack and the page scrolls again. */
+.wrap--wide {
+  max-width: 1140px;
+  height: 100svh;
+}
 
 /* ---- header ---------------------------------------------------------- */
 
@@ -317,15 +321,70 @@ button.recording {
   color: var(--text-muted);
 }
 
-/* ---- coding round (current single-column shape; PR 3 rebuilds it) ----- */
+/* ---- coding round ----------------------------------------------------- */
+
+/* Editor two thirds, interviewer one third. Below 900px the panes stack with
+   the question first - the code is what you came here to read. */
+.round {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--s4);
+  align-items: stretch;
+}
+
+.round-main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.rail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s4);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  border-left: 2px solid var(--text);
+}
+
+.rail-latest { color: var(--text); margin-top: var(--s1); }
+
+.rail-earlier {
+  margin-top: var(--s4);
+  border-top: 1px solid var(--border);
+  padding-top: var(--s3);
+}
+
+.rail-earlier summary {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.messages--rail { padding: var(--s3) 0 0; gap: var(--s4); }
 
 .dsa-pane {
-  border-top: 1px solid var(--border);
-  padding: var(--s3);
+  flex: 1;
+  padding: var(--s4);
   display: flex;
   flex-direction: column;
   gap: var(--s3);
+  min-height: 0;
 }
+
+.dsa-prompt { color: var(--text); }
 
 .dsa-signature {
   font-family: var(--mono);
@@ -340,9 +399,55 @@ button.recording {
   text-align: left;
 }
 
+/* The editor takes the slack in the pane, so the code area grows with the
+   window instead of sitting in a fixed box above dead space. */
+.dsa-editor {
+  flex: 1;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Flex, not a percentage height: the wrapper's height comes from min-height and
+   flex growth, so a percentage on the child would resolve to auto. */
+.dsa-pane .cm-editor { flex: 1; min-height: 0; }
+
 .dsa-actions { display: flex; gap: var(--s2); }
 
-.dsa-results { font-size: 0.8125rem; }
+/* The report scrolls in place rather than growing the page - a long failure
+   list must not push the composer below the fold mid-round. */
+.dsa-results {
+  font-size: 0.8125rem;
+  max-height: 24vh;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.dsa-fails {
+  width: 100%;
+  margin-top: var(--s2);
+  border-collapse: collapse;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.dsa-fails th {
+  font-weight: normal;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.625rem;
+}
+
+.dsa-fails th,
+.dsa-fails td {
+  padding: var(--s2) var(--s3) var(--s2) 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  word-break: break-word;
+}
 
 /* Unscoped on purpose: the evaluation's coding section reuses these outside
    .dsa-results. These two are the only coloured text in the app. */
@@ -426,4 +531,10 @@ button.recording {
 
 @media (max-width: 860px) {
   .hero-art { display: none; }
+}
+
+@media (max-width: 900px) {
+  .round { grid-template-columns: 1fr; }
+  .wrap--wide { height: auto; }
+  .rail { overflow-y: visible; }
 }
