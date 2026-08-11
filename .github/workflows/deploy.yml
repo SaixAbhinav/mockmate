@@ -1,0 +1,98 @@
+name: Deploy
+
+# Builds the backend image, applies the full Terraform stack, then builds
+# and publishes the frontend - in that order, because the Lambda (created/
+# updated by `apply`) points at the image tag pushed in the first step,
+# and the frontend can only be synced/invalidated once the bucket and
+# CloudFront distribution exist. Authenticates to AWS via GitHub OIDC
+# (ADR 0029, PR 4) - no AWS access keys are stored in this repo.
+#
+# Merge-order note: this workflow's first run against `main` only
+# succeeds once PR 2b (Lambda/API Gateway) and PR 3 (S3/CloudFront) have
+# both merged - see infra/README.md's CI/CD section.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+# One deploy to main at a time. cancel-in-progress is false: never interrupt
+# an in-flight `terraform apply` - the DynamoDB lock would block the second
+# run anyway, but cancelling mid-apply could leave state and reality diverged.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: build, apply, deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::356252962813:role/mockmate-github-deploy
+          aws-region: us-east-1
+
+      # --- Backend image: build and push before `apply`, since the
+      # Lambda (updated by apply) is pinned to this image tag. ---
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login-password --region us-east-1 \
+            | docker login --username AWS --password-stdin 356252962813.dkr.ecr.us-east-1.amazonaws.com
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push backend image
+        # --provenance=false is required: Lambda rejects the multi-arch
+        # attestation manifest BuildKit attaches by default (see
+        # infra/README.md). --platform pins the build to Lambda's x86_64
+        # runtime regardless of the runner's own architecture.
+        run: |
+          docker buildx build \
+            --provenance=false \
+            --platform linux/amd64 \
+            -t 356252962813.dkr.ecr.us-east-1.amazonaws.com/mockmate:latest \
+            --push .
+
+      # --- Terraform apply: full stack, including the Lambda picking up
+      # the image just pushed above. ---
+      - uses: hashicorp/setup-terraform@v4
+
+      - name: Terraform init
+        run: terraform -chdir=infra init
+
+      - name: Terraform apply
+        run: terraform -chdir=infra apply -auto-approve -input=false
+
+      # --- Frontend: built and synced after apply, so the bucket and
+      # distribution referenced by the outputs below already exist. ---
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Build frontend
+        run: npm run build --prefix frontend
+
+      - name: Sync frontend to S3
+        run: |
+          aws s3 sync frontend/dist "s3://$(terraform -chdir=infra output -raw frontend_bucket_name)" --delete
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "$(terraform -chdir=infra output -raw cloudfront_distribution_id)" \
+            --paths "/*"
+
+      - name: Smoke test
+        run: curl -fsS "$(terraform -chdir=infra output -raw api_endpoint)/api/health"
