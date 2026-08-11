@@ -65,3 +65,17 @@ output "cloudwatch_dashboard_url" {
   description = "Console URL for the mockmate CloudWatch dashboard (Lambda/API Gateway/DynamoDB/CloudFront at a glance)."
   value       = "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards/dashboard/${aws_cloudwatch_dashboard.mockmate.dashboard_name}"
 }
+
+# Consumed by PR 4 (GitHub Actions OIDC CI/CD) - not by the workflows
+# themselves (they hardcode the role ARN so they can assume it before any
+# `terraform output` is possible), but useful for verifying what got
+# created after the one-time local bootstrap apply.
+output "github_deploy_role_arn" {
+  description = "IAM role ARN GitHub Actions assumes via OIDC to plan/apply this stack."
+  value       = aws_iam_role.github_deploy.arn
+}
+
+output "github_oidc_provider_arn" {
+  description = "The GitHub Actions OIDC identity provider's ARN."
+  value       = aws_iam_openid_connect_provider.github.arn
+}

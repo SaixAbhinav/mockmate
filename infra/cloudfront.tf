@@ -74,12 +74,12 @@ resource "aws_cloudfront_distribution" "frontend" {
   # per-request and must never be served stale), and POST-heavy since most
   # of the app's traffic is submitting answers/code, not GETs.
   ordered_cache_behavior {
-    path_pattern              = "/api/*"
-    target_origin_id          = "apigw"
-    viewer_protocol_policy    = "redirect-to-https"
-    allowed_methods           = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
-    cached_methods            = ["GET", "HEAD"]
-    cache_policy_id           = data.aws_cloudfront_cache_policy.caching_disabled.id
+    path_pattern             = "/api/*"
+    target_origin_id         = "apigw"
+    viewer_protocol_policy   = "redirect-to-https"
+    allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods           = ["GET", "HEAD"]
+    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
     origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
   }
 

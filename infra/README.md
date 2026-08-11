@@ -312,3 +312,40 @@ One dashboard (3 free), five alarms (10 free), one SNS topic and email
 subscription (both free), and the CloudWatch metrics themselves (all
 listed here are standard, not the paid detailed/high-resolution kind).
 Nothing in this file changes ADR 0029's ~$0/month bound.
+
+## CI/CD (PR 4)
+
+`infra/iam_github_oidc.tf` defines the GitHub Actions OIDC provider and the
+`mockmate-github-deploy` IAM role two workflows assume to run this stack from
+CI: [`.github/workflows/terraform-plan.yml`](../.github/workflows/terraform-plan.yml)
+(`terraform plan` on every PR touching `infra/`, `backend/`, `frontend/`, or the
+workflows themselves) and
+[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) (build +
+push the backend image, `terraform apply`, then build + sync the frontend and
+invalidate CloudFront, on every push to `main`).
+
+**No AWS access keys are stored in GitHub.** Both workflows authenticate via
+OIDC federation - GitHub issues each job a short-lived OIDC token, and
+`aws-actions/configure-aws-credentials` exchanges it for temporary STS
+credentials by assuming `mockmate-github-deploy`
+(`sts:AssumeRoleWithWebIdentity`). Nothing long-lived ever leaves AWS.
+
+**One-time bootstrap - this can't be turned on from CI itself.** The OIDC
+provider and the deploy role have to exist *before* any workflow can assume
+the role, so the `terraform apply` that first creates
+`infra/iam_github_oidc.tf`'s resources must be run **locally**, the same way
+every other resource in this directory was bootstrapped. Once that one apply
+has run, every later plan/apply - including changes to this same file - can
+go through the workflows normally.
+
+**Merge-order caveat.** PR 4 must merge **after** PR 2b (Lambda + API
+Gateway, #42) and PR 3 (S3 + CloudFront, #43). `deploy.yml` assumes the full
+stack's outputs exist (`ecr_repository_url`, `api_endpoint`,
+`frontend_bucket_name`, `cloudfront_distribution_id`, `cloudfront_domain`) -
+its first run against `main` only succeeds once all of those are real.
+
+**Supersedes the manual runbook.** Once merged and bootstrapped, pushing to
+`main` is the deploy path; the manual `docker build`/`terraform apply`/`aws s3
+sync` steps described elsewhere in this README stay documented as the
+fallback (e.g. for a local `apply` while iterating, or if CI is down), not
+the everyday path.
