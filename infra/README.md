@@ -313,30 +313,45 @@ subscription (both free), and the CloudWatch metrics themselves (all
 listed here are standard, not the paid detailed/high-resolution kind).
 Nothing in this file changes ADR 0029's ~$0/month bound.
 
-## CI/CD (PR 4)
+## CI/CD (PR 4, hardened by ADR 0031)
 
 `infra/iam_github_oidc.tf` defines the GitHub Actions OIDC provider and the
-`mockmate-github-deploy` IAM role two workflows assume to run this stack from
-CI: [`.github/workflows/terraform-plan.yml`](../.github/workflows/terraform-plan.yml)
-(`terraform plan` on every PR touching `infra/`, `backend/`, `frontend/`, or the
-workflows themselves) and
-[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) (build +
-push the backend image, `terraform apply`, then build + sync the frontend and
-invalidate CloudFront, on every push to `main`).
+**two** IAM roles the workflows assume to run this stack from CI - one per
+workflow, with deliberately different power (ADR 0031):
+
+| Workflow | Role | Trust (`sub`) | Permissions |
+|---|---|---|---|
+| [`terraform-plan.yml`](../.github/workflows/terraform-plan.yml) — `terraform plan` on every PR touching `infra/`, `backend/`, `frontend/`, or the workflows | `mockmate-github-plan` | `repo:SaixAbhinav/mockmate:pull_request` | `ReadOnlyAccess` + state lock + `kms:Decrypt` |
+| [`deploy.yml`](../.github/workflows/deploy.yml) — build + push the image, `terraform apply`, build + sync the frontend, invalidate CloudFront, on every push to `main` | `mockmate-github-deploy` | `repo:SaixAbhinav/mockmate:ref:refs/heads/main` | `PowerUserAccess` + scoped IAM top-up |
+
+The split exists because PR workflows run the workflow definition from the
+PR's own branch: if that job could assume a `PowerUserAccess` role, anyone
+who could open a PR could edit the workflow into arbitrary AWS access. Plans
+only read, so the plan role only reads. Both trust conditions are
+`StringEquals` - no wildcard `sub` remains on either role.
 
 **No AWS access keys are stored in GitHub.** Both workflows authenticate via
 OIDC federation - GitHub issues each job a short-lived OIDC token, and
 `aws-actions/configure-aws-credentials` exchanges it for temporary STS
-credentials by assuming `mockmate-github-deploy`
+credentials by assuming the role above
 (`sts:AssumeRoleWithWebIdentity`). Nothing long-lived ever leaves AWS.
 
-**One-time bootstrap - this can't be turned on from CI itself.** The OIDC
-provider and the deploy role have to exist *before* any workflow can assume
-the role, so the `terraform apply` that first creates
-`infra/iam_github_oidc.tf`'s resources must be run **locally**, the same way
-every other resource in this directory was bootstrapped. Once that one apply
-has run, every later plan/apply - including changes to this same file - can
-go through the workflows normally.
+> **Gotcha when editing these trust policies.** Both condition keys (`aud`
+> and `sub`) must sit *inside* the `StringEquals` block. A key placed
+> directly under `Condition` is parsed as an operator name and IAM rejects
+> the whole document with `MalformedPolicyDocument: Invalid condition
+> prefix`. `terraform validate` does **not** catch this - the config is
+> valid HCL and valid JSON, so it only fails at apply time.
+
+**One-time bootstrap - this can't be turned on from CI itself.** A role has
+to exist *before* any workflow can assume it, so the `terraform apply` that
+first creates it must be run **locally**. This applies to any *new* role
+here, not just the original two resources: adding `mockmate-github-plan`
+(ADR 0031) hit the same wall, because the PR introducing it referenced the
+role in `terraform-plan.yml` before the role existed - the same way every
+other resource in this directory was bootstrapped. Once that one apply has
+run, every later plan/apply - including changes to this same file - can go
+through the workflows normally.
 
 **Merge-order caveat.** PR 4 must merge **after** PR 2b (Lambda + API
 Gateway, #42) and PR 3 (S3 + CloudFront, #43). `deploy.yml` assumes the full
