@@ -1,6 +1,6 @@
 # ADR 0031: Split the CI role in two — main-only deploy, read-only PR plan
 
-Date: 2026-08-11 · Status: proposed · Hardens [0029](0029-serverless-aws-deploy.md)'s PR 4
+Date: 2026-08-11 · Status: accepted · shipped · Hardens [0029](0029-serverless-aws-deploy.md)'s PR 4
 
 ## Context
 

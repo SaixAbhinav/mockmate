@@ -47,7 +47,8 @@ index that drifts from the ADRs is worse than no index.
 | [0027](0027-check-in-policy-owns-its-state.md) | The check-in policy owns its own state | accepted · amends [0018](0018-watching-interviewer-check-ins.md) |
 | [0028](0028-a-reply-starts-the-watcher-cooldown.md) | A chat reply starts the Watcher's cooldown | accepted · amends [0019](0019-voice-live-while-coding.md) |
 | [0029](0029-serverless-aws-deploy.md) | Serverless AWS deploy — Terraform IaC and idempotent state at scale | accepted · shipped · supersedes [0025](0025-deploy-render-static-plus-api.md)'s host |
-| [0031](0031-least-privilege-ci-roles.md) | Split the CI role in two — main-only deploy, read-only PR plan | proposed · hardens [0029](0029-serverless-aws-deploy.md)'s PR 4 |
+| [0030](0030-callback-rename-and-visual-system.md) | Callback — rename, and a monochrome visual system | accepted |
+| [0031](0031-least-privilege-ci-roles.md) | Split the CI role in two — main-only deploy, read-only PR plan | accepted · shipped · hardens [0029](0029-serverless-aws-deploy.md)'s PR 4 |
 
 ## Open — decided direction, not yet closed out
 
