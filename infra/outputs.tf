@@ -79,3 +79,8 @@ output "github_oidc_provider_arn" {
   description = "The GitHub Actions OIDC identity provider's ARN."
   value       = aws_iam_openid_connect_provider.github.arn
 }
+
+output "github_plan_role_arn" {
+  description = "IAM role ARN terraform-plan.yml assumes via OIDC on pull requests - read-only plus state-lock access (ADR 0031)."
+  value       = aws_iam_role.github_plan.arn
+}

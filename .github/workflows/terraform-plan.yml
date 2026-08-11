@@ -25,7 +25,10 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::356252962813:role/mockmate-github-deploy
+          # Read-only plan role, not the deploy role (ADR 0031): PR
+          # workflows run branch-supplied code, so this job must not hold
+          # credentials that can mutate AWS.
+          role-to-assume: arn:aws:iam::356252962813:role/mockmate-github-plan
           aws-region: us-east-1
 
       - uses: hashicorp/setup-terraform@v4

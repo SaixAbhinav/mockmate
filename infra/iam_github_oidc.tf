@@ -25,9 +25,16 @@ resource "aws_iam_openid_connect_provider" "github" {
   }
 }
 
-# The role GitHub Actions assumes to plan/apply this stack and push
-# images/frontend assets. Trust is scoped to this one repo via the `sub`
-# claim; `aud` is pinned to STS per AWS's standard GitHub OIDC guidance.
+# The role deploy.yml assumes to apply this stack and push images/frontend
+# assets. Trust is scoped to this one repo via the `sub` claim; `aud` is
+# pinned to STS per AWS's standard GitHub OIDC guidance.
+#
+# Trust is restricted to the `main` branch ref specifically (ADR 0031). It
+# was `repo:SaixAbhinav/mockmate:*` through PR 4, which meant any branch or
+# PR context in the repo could assume a PowerUserAccess role - so anyone who
+# could open a PR could run arbitrary AWS actions by editing a workflow. The
+# pipeline is now proven out, which was the stated condition for tightening.
+# PR plans use `github_plan` below instead.
 resource "aws_iam_role" "github_deploy" {
   name = "mockmate-github-deploy"
 
@@ -44,15 +51,11 @@ resource "aws_iam_role" "github_deploy" {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
           }
-          # Any branch/ref/PR/environment in this repo can assume the
-          # role. Deliberately broad for now (both terraform-plan.yml on
-          # PRs and deploy.yml on main need it) - tighten to
-          # "repo:SaixAbhinav/mockmate:ref:refs/heads/main" (deploy) plus
-          # a separate, lower-privileged role for PR plans once the
-          # pipeline is proven out.
-          StringLike = {
-            "token.actions.githubusercontent.com:sub" = "repo:SaixAbhinav/mockmate:*"
-          }
+          # Exact match on the main-branch ref, not a StringLike wildcard:
+          # a PR from a fork or a branch named to look like main cannot
+          # produce this `sub`. GitHub mints it from the ref that triggered
+          # the run, so only a push to main yields it.
+          "token.actions.githubusercontent.com:sub" = "repo:SaixAbhinav/mockmate:ref:refs/heads/main"
         }
       }
     ]
@@ -146,6 +149,91 @@ resource "aws_iam_role_policy" "github_deploy_iam_management" {
           "iam:UntagOpenIDConnectProvider",
         ]
         Resource = "arn:aws:iam::356252962813:oidc-provider/token.actions.githubusercontent.com"
+      },
+    ]
+  })
+}
+
+# The role terraform-plan.yml assumes on pull requests (ADR 0031).
+#
+# Separate from the deploy role because the two jobs need genuinely
+# different power: `plan` only reads the world and compares it to the
+# config, while `apply` mutates it. Since PR workflows run code from the
+# PR's own branch, whatever this role can do is effectively what any
+# contributor can do - so it gets read-only plus the narrow state-backend
+# access `plan` needs, and nothing else.
+resource "aws_iam_role" "github_plan" {
+  name = "mockmate-github-plan"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.github.arn
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+            # `pull_request` is the sub GitHub mints for pull_request-event
+            # runs, regardless of the head branch's name. Pairs with the
+            # deploy role's main-only ref: between them, every workflow
+            # context in this repo maps to exactly one role.
+            "token.actions.githubusercontent.com:sub" = "repo:SaixAbhinav/mockmate:pull_request"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name = "mockmate-github-plan"
+  }
+}
+
+# `terraform plan` refreshes every resource in the stack, so it needs broad
+# *read* across the same services the deploy role writes. ReadOnlyAccess is
+# the mirror of PowerUserAccess's role here: service-wide, but incapable of
+# mutating anything.
+resource "aws_iam_role_policy_attachment" "github_plan_read_only" {
+  role       = aws_iam_role.github_plan.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+# Two things `plan` needs that ReadOnlyAccess does not cover.
+resource "aws_iam_role_policy" "github_plan_state_access" {
+  name = "mockmate-github-plan-state-access"
+  role = aws_iam_role.github_plan.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        # State locking is a *write* to the lock table even on a read-only
+        # plan - Terraform takes the lock before refreshing and releases it
+        # after. Without this, every PR plan fails to acquire the lock.
+        # Scoped to the lock table alone, not the app's session table.
+        Sid    = "AcquireAndReleaseStateLock"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:DeleteItem",
+        ]
+        Resource = "arn:aws:dynamodb:${var.region}:356252962813:table/mockmate-tflock"
+      },
+      {
+        # The two SSM parameters are SecureString. The provider reads them
+        # with decryption on every refresh, and ReadOnlyAccess grants
+        # ssm:GetParameter but not the kms:Decrypt that SecureString needs
+        # - so a plan would fail on those two resources without this.
+        # Scoped to the account's default SSM key only.
+        Sid      = "DecryptSsmSecureStrings"
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = data.aws_kms_alias.ssm.target_key_arn
       },
     ]
   })
