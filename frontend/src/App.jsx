@@ -4,6 +4,7 @@ import { Transcript } from './components/Transcript'
 import { Composer } from './components/Composer'
 import { StartScreen } from './components/StartScreen'
 import { CodingWorkspace } from './components/CodingWorkspace'
+import { InterviewerRail } from './components/InterviewerRail'
 import { Evaluation } from './components/Evaluation'
 import { useVoices } from './hooks/useVoices'
 import { useApiReady } from './hooks/useApiReady'
@@ -110,8 +111,12 @@ function App() {
       (phase === 'probing' ? ' · probing' : phase === 'clarifying' ? ' · clarifying' : '')
     : null
 
+  // The coding round is the one screen that needs code and conversation side by
+  // side (ADR 0018), so the page widens for it and narrows again on submit.
+  const coding = Boolean(dsa) && !dsaSubmitted
+
   return (
-    <main className="wrap">
+    <main className={`wrap${coding ? ' wrap--wide' : ''}`}>
       <header className="topbar">
         <div className="brand">
           <span className="brand-name">Callback</span>
@@ -149,6 +154,32 @@ function App() {
         </p>
       )}
 
+      {coding ? (
+        <section className="round">
+          <div className="round-main">
+            <CodingWorkspace
+              dsa={dsa}
+              code={code}
+              onCodeChange={round.setCode}
+              running={running}
+              status={status}
+              onRun={round.runCode}
+              onSubmit={round.submitCode}
+              runReport={runReport}
+            />
+            <Composer
+              value={draft}
+              onDraftChange={setDraft}
+              onSubmit={handleTextSubmit}
+              status={status}
+              placeholder="Think aloud or ask the interviewer"
+              onStartRecording={startRecording}
+              onStopRecording={stopRecording}
+            />
+          </div>
+          <InterviewerRail history={history} status={status} />
+        </section>
+      ) : (
       <section className="chat">
         <Transcript history={history} done={done} endRef={chatEndRef} status={status} />
 
@@ -159,31 +190,18 @@ function App() {
             </button>
           </div>
         ) : (
-          <>
-            {dsa && !dsaSubmitted && (
-              <CodingWorkspace
-                dsa={dsa}
-                code={code}
-                onCodeChange={round.setCode}
-                running={running}
-                status={status}
-                onRun={round.runCode}
-                onSubmit={round.submitCode}
-                runReport={runReport}
-              />
-            )}
-            <Composer
-              value={draft}
-              onDraftChange={setDraft}
-              onSubmit={handleTextSubmit}
-              status={status}
-              placeholder={dsa && !dsaSubmitted ? 'Think aloud or ask the interviewer' : 'Type here'}
-              onStartRecording={startRecording}
-              onStopRecording={stopRecording}
-            />
-          </>
+          <Composer
+            value={draft}
+            onDraftChange={setDraft}
+            onSubmit={handleTextSubmit}
+            status={status}
+            placeholder="Type here"
+            onStartRecording={startRecording}
+            onStopRecording={stopRecording}
+          />
         )}
       </section>
+      )}
 
       {done && evaluating && <p className="hint">Scoring your interview…</p>}
 

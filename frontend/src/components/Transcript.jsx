@@ -1,6 +1,9 @@
-export function Transcript({ history, done, endRef, status }) {
+// `variant` is layout only: 'full' is the centred interview column, 'rail' is
+// the coding round's narrow column of earlier messages. Same turns, same
+// speaker rules - the two screens share one idea rather than inventing two.
+export function Transcript({ history, done, endRef, status, variant = 'full' }) {
   return (
-    <div className="messages">
+    <div className={`messages messages--${variant}`}>
       {history.map((m, i) => (
         <div
           key={i}
