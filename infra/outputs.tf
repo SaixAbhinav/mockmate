@@ -30,6 +30,42 @@ output "gemini_api_key_parameter_name" {
   value       = aws_ssm_parameter.gemini_api_key.name
 }
 
+# PR 2b's own output - the backend URL for the frontend (PR 3) and for a
+# post-apply smoke test (see infra/README.md).
+output "api_endpoint" {
+  description = "Invoke URL of the HTTP API's $default stage - the backend's public base URL. Append /api/health for a smoke test."
+  value       = aws_apigatewayv2_api.http.api_endpoint
+}
+
+# PR 3's outputs - the frontend deploy runbook (README.md) consumes these:
+# the bucket name to `aws s3 sync` into, the domain to visit, and the
+# distribution id to invalidate after each new build.
+output "frontend_bucket_name" {
+  description = "S3 bucket name for the built SPA - sync `frontend/dist` here (see README's deploy runbook)."
+  value       = aws_s3_bucket.frontend.bucket
+}
+
+output "cloudfront_domain" {
+  description = "CloudFront distribution domain name - the URL to visit. Single origin: '/' serves the SPA from S3, '/api/*' forwards to the API Gateway HTTP API above, so there is no production CORS."
+  value       = aws_cloudfront_distribution.frontend.domain_name
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution id - pass to `aws cloudfront create-invalidation --distribution-id <this> --paths \"/*\"` after each frontend redeploy."
+  value       = aws_cloudfront_distribution.frontend.id
+}
+
+# PR 5's outputs (cloudwatch.tf) - see infra/README.md's Monitoring section.
+output "sns_alerts_topic_arn" {
+  description = "SNS topic ARN that every CloudWatch alarm notifies. No email subscription is created by Terraform - subscribe with `aws sns subscribe --topic-arn <this> --protocol email --notification-endpoint you@example.com` and confirm the email (see README)."
+  value       = aws_sns_topic.alerts.arn
+}
+
+output "cloudwatch_dashboard_url" {
+  description = "Console URL for the mockmate CloudWatch dashboard (Lambda/API Gateway/DynamoDB/CloudFront at a glance)."
+  value       = "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards/dashboard/${aws_cloudwatch_dashboard.mockmate.dashboard_name}"
+}
+
 # Consumed by PR 4 (GitHub Actions OIDC CI/CD) - not by the workflows
 # themselves (they hardcode the role ARN so they can assume it before any
 # `terraform output` is possible), but useful for verifying what got
