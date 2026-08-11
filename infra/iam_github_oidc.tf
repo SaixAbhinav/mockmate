@@ -48,14 +48,17 @@ resource "aws_iam_role" "github_deploy" {
         }
         Action = "sts:AssumeRoleWithWebIdentity"
         Condition = {
+          # Both keys must sit inside StringEquals - a condition key placed
+          # directly under Condition is read as an operator name and IAM
+          # rejects the document with "Invalid condition prefix".
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+            # Exact match on the main-branch ref, not a StringLike wildcard:
+            # a PR from a fork or a branch named to look like main cannot
+            # produce this `sub`. GitHub mints it from the ref that triggered
+            # the run, so only a push to main yields it.
+            "token.actions.githubusercontent.com:sub" = "repo:SaixAbhinav/mockmate:ref:refs/heads/main"
           }
-          # Exact match on the main-branch ref, not a StringLike wildcard:
-          # a PR from a fork or a branch named to look like main cannot
-          # produce this `sub`. GitHub mints it from the ref that triggered
-          # the run, so only a push to main yields it.
-          "token.actions.githubusercontent.com:sub" = "repo:SaixAbhinav/mockmate:ref:refs/heads/main"
         }
       }
     ]
