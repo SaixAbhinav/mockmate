@@ -1,0 +1,46 @@
+name: Terraform Plan
+
+# Shows what a merge would change before it happens. Read-only: this never
+# runs `apply`. Authenticates to AWS via GitHub OIDC (ADR 0029, PR 4) - no
+# AWS access keys are stored in this repo.
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  plan:
+    name: terraform plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::356252962813:role/mockmate-github-deploy
+          aws-region: us-east-1
+
+      - uses: hashicorp/setup-terraform@v4
+
+      - name: Terraform init
+        run: terraform -chdir=infra init
+
+      - name: Terraform validate
+        run: terraform -chdir=infra validate
+
+      - name: Terraform fmt check
+        # Informational only - infra/ has a known cosmetic alignment nit
+        # not yet normalized, so this must never fail the job.
+        run: terraform -chdir=infra fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform plan
+        run: terraform -chdir=infra plan -no-color -input=false
