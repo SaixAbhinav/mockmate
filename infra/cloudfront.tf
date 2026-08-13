@@ -89,12 +89,46 @@ resource "aws_cloudfront_distribution" "frontend" {
     }
   }
 
-  # No custom domain yet - the default *.cloudfront.net certificate is
-  # fine for a demo deploy. A custom domain would need its own ACM cert
-  # (us-east-1, since CloudFront only reads certs from that region) plus
-  # `aliases` here; not in scope for this PR.
-  viewer_certificate {
-    cloudfront_default_certificate = true
+  # Custom domain (ADR 0032), off until phase 2 - see acm.tf for why the
+  # cutover is two applies. While inactive this is empty and the block
+  # below serves the default *.cloudfront.net certificate, exactly as
+  # before.
+  aliases = local.custom_domain_active ? [var.custom_domain] : []
+
+  # Exactly one of these two renders: the for_each expressions are
+  # mutually exclusive, and viewer_certificate is a required, max-one
+  # block. Attaching an ACM cert and serving the default cert are
+  # different attribute sets, not different values of the same one, which
+  # is why this is two dynamic blocks rather than a conditional.
+  dynamic "viewer_certificate" {
+    for_each = local.custom_domain_active ? [1] : []
+    content {
+      acm_certificate_arn = aws_acm_certificate.frontend[0].arn
+      ssl_support_method  = "sni-only"
+      # TLS 1.2+ only. The default (TLSv1) is weaker than anything this
+      # app's browsers need.
+      minimum_protocol_version = "TLSv1.2_2021"
+    }
+  }
+
+  dynamic "viewer_certificate" {
+    for_each = local.custom_domain_active ? [] : [1]
+    content {
+      cloudfront_default_certificate = true
+    }
+  }
+
+  # Turns the most likely operator mistake - flipping
+  # custom_domain_active before the is-a.dev PR merged and the cert
+  # issued - into a sentence instead of an opaque CloudFront API error.
+  lifecycle {
+    precondition {
+      condition = !local.custom_domain_active || (
+        length(aws_acm_certificate.frontend) > 0 &&
+        aws_acm_certificate.frontend[0].status == "ISSUED"
+      )
+      error_message = "custom_domain_active is true but the ACM certificate for ${var.custom_domain} is not ISSUED yet. Merge the is-a.dev PR carrying the validation CNAME (terraform output acm_validation_record), wait for it to propagate, then re-apply."
+    }
   }
 
   tags = {

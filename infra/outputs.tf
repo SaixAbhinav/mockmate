@@ -55,6 +55,27 @@ output "cloudfront_distribution_id" {
   value       = aws_cloudfront_distribution.frontend.id
 }
 
+# ADR 0032's outputs - the custom-domain cutover.
+
+output "acm_validation_record" {
+  description = "The DNS record proving domain ownership to ACM. Copy name/value into the is-a.dev register PR (see infra/README.md); empty when no custom_domain is set."
+  value = length(aws_acm_certificate.frontend) == 0 ? null : {
+    name  = one(aws_acm_certificate.frontend[0].domain_validation_options).resource_record_name
+    type  = one(aws_acm_certificate.frontend[0].domain_validation_options).resource_record_type
+    value = one(aws_acm_certificate.frontend[0].domain_validation_options).resource_record_value
+  }
+}
+
+output "acm_certificate_status" {
+  description = "ACM certificate status. Stays PENDING_VALIDATION until the is-a.dev PR merges and propagates; must read ISSUED before custom_domain_active can be flipped to true."
+  value       = length(aws_acm_certificate.frontend) == 0 ? null : aws_acm_certificate.frontend[0].status
+}
+
+output "site_url" {
+  description = "The URL to visit - the custom domain once it is active (ADR 0032), otherwise the CloudFront default name."
+  value       = local.custom_domain_active ? "https://${var.custom_domain}" : "https://${aws_cloudfront_distribution.frontend.domain_name}"
+}
+
 # PR 5's outputs (cloudwatch.tf) - see infra/README.md's Monitoring section.
 output "sns_alerts_topic_arn" {
   description = "SNS topic ARN that every CloudWatch alarm notifies. No email subscription is created by Terraform - subscribe with `aws sns subscribe --topic-arn <this> --protocol email --notification-endpoint you@example.com` and confirm the email (see README)."

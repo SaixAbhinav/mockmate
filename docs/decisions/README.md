@@ -49,6 +49,7 @@ index that drifts from the ADRs is worse than no index.
 | [0029](0029-serverless-aws-deploy.md) | Serverless AWS deploy — Terraform IaC and idempotent state at scale | accepted · shipped · live on AWS · supersedes [0025](0025-deploy-render-static-plus-api.md)'s host |
 | [0030](0030-callback-rename-and-visual-system.md) | Callback — rename, and a monochrome visual system | accepted |
 | [0031](0031-least-privilege-ci-roles.md) | Split the CI role in two — main-only deploy, read-only PR plan | accepted · shipped · hardens [0029](0029-serverless-aws-deploy.md)'s PR 4 |
+| [0032](0032-custom-domain-free-subdomain.md) | A readable URL for free — `callback.is-a.dev` over CloudFront | accepted · in progress (phase 1 of 2) · extends [0029](0029-serverless-aws-deploy.md) |
 
 ## Open — decided direction, not yet closed out
 
