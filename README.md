@@ -93,11 +93,40 @@ authorship.
 
 ## Deploying
 
-Deployed as two Render services behind one origin
-([ADR 0025](docs/decisions/0025-deploy-render-static-plus-api.md)): an always-on
-static site serving the SPA, which rewrites `/api/*` to a Docker web service
-running the API. The browser only ever sees one origin, so there is no CORS in
+Live at **https://d1ukk616lu5bcc.cloudfront.net**.
+
+Deployed serverless on AWS
+([ADR 0029](docs/decisions/0029-serverless-aws-deploy.md)), defined entirely in
+Terraform (`infra/`) and shipped by a GitHub Actions pipeline that authenticates
+via OIDC — no AWS keys live in this repo. **CloudFront is the single origin:**
+`/` serves the built SPA from a private S3 bucket, `/api/*` forwards to an API
+Gateway HTTP API in front of the FastAPI backend on Lambda, with Session state
+in DynamoDB and secrets in SSM Parameter Store. Because it is one origin, the
+frontend's relative `/api/...` calls work unchanged and there is no CORS in
 production — the same thing `vite.config.js` does with a proxy in development.
+
+Pushing to `main` is the deploy path: `.github/workflows/deploy.yml` builds and
+pushes the backend image to ECR, runs `terraform apply`, builds and syncs the
+frontend to S3, invalidates the CloudFront cache, and smoke-tests `/api/health`.
+Pull requests touching `infra/`, `backend/`, or `frontend/` get a
+`terraform plan` from a separate read-only role ([ADR 0031](docs/decisions/0031-least-privilege-ci-roles.md)).
+See [infra/README.md](infra/README.md) for the manual runbook, the one-time
+bootstrap, and the monitoring dashboard and alarms.
+
+Sessions live in DynamoDB rather than the process, so a redeploy no longer ends
+an interview in progress. Cold starts land on the first API call instead of the
+page: the static frontend is always instant, and the start screen pings
+`/api/health` on mount to warm the Lambda while you read.
+
+### Fallback: Render
+
+The pre-AWS host ([ADR 0025](docs/decisions/0025-deploy-render-static-plus-api.md))
+is kept documented and working — the same container image runs locally, on
+Render, and on Lambda, so retaining it costs nothing. It is **not** the live
+deploy. Two Render services behind one origin: an always-on
+static site serving the SPA, which rewrites `/api/*` to a Docker web service
+running the API. The browser only ever sees one origin here too, so this path is
+also CORS-free.
 
 1. Push this repo to GitHub and create a **Blueprint** on Render pointing at
    `render.yaml`.
@@ -119,9 +148,9 @@ production — the same thing `vite.config.js` does with a proxy in development.
 The API runs on Render's free tier, so it **sleeps after 15 minutes idle** and
 takes 30–60s to wake. The static site never sleeps, so the page always loads
 instantly, and the start screen pings `/api/health` on mount to wake the API
-while you read. Sessions are in-memory
-([ADR 0007](docs/decisions/0007-session-state-in-memory.md)), so a redeploy ends
-any interview in progress.
+while you read. On this path sessions are in-memory
+([ADR 0007](docs/decisions/0007-session-state-in-memory.md)) unless the DynamoDB
+store is enabled, so a redeploy ends any interview in progress.
 
 You can also run the container by itself:
 

@@ -171,11 +171,13 @@ first live résumé upload is the real test — and the `VITE_API_BASE` /
 `CORS_ORIGINS` fallback exists so the answer costs two environment variables
 rather than a redesign.
 
-**Host superseded by [ADR 0029](0029-serverless-aws-deploy.md).** The
-serverless AWS deploy is taking over the host: the backend (API
-Gateway/Lambda/DynamoDB/SSM) is already live, and the CloudFront/S3 frontend
-flips over once its account-verification step clears (pending at time of
-writing) — replacing this ADR's two Render services. This ADR's
+**Host superseded by [ADR 0029](0029-serverless-aws-deploy.md) — complete.** The
+serverless AWS deploy has taken over the host in full: the backend (API
+Gateway/Lambda/DynamoDB/SSM) and now the CloudFront/S3 frontend, whose
+account-verification step has cleared and whose distribution is live and served
+by CI on every merge to `main`. Both of this ADR's Render services are replaced.
+Render remains a **documented, working fallback** — one container image runs
+locally, on Render, and on Lambda — but is no longer the live deploy. This ADR's
 app-level decisions (the single-origin rewrite property, the runner's
 accepted soft-sandbox risk, the landing-page cold-start mitigation) carried
 straight over and still describe real, if now superseded, reasoning; kept
