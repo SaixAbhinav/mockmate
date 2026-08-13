@@ -258,6 +258,87 @@ Render host, per ADR 0029's status section. Updating that ADR's (and the
 decisions index's) status to reflect the supersession is PR 5's docs step,
 not this one.
 
+## Custom domain (ADR 0032)
+
+`acm.tf` plus the guarded `aliases`/`viewer_certificate` wiring in
+`cloudfront.tf` put the app at **`https://callback.is-a.dev`** instead of
+the AWS-assigned `d1ukk616lu5bcc.cloudfront.net`. DNS is hosted free by
+[is-a.dev](https://github.com/is-a-dev/register), whose records are added
+by **pull request to their repo** - which is why the cutover is two
+applies rather than one. See
+[ADR 0032](../docs/decisions/0032-custom-domain-free-subdomain.md) for the
+reasoning; the mechanics are below.
+
+Two variables gate it (`variables.tf`):
+
+| Variable | Default | Effect |
+|---|---|---|
+| `custom_domain` | `callback.is-a.dev` | Creates the ACM certificate and outputs its validation record. Attaches nothing. `""` disables the domain entirely. |
+| `custom_domain_active` | `false` | Attaches the alias + certificate to the distribution. Flip only once the certificate reads `ISSUED`. |
+
+While `custom_domain_active` is `false`, the distribution serves its
+default `*.cloudfront.net` certificate exactly as before - so a stalled
+is-a.dev PR is a no-op, not an outage.
+
+### Phase 1 - create the certificate (done by merging to `main`)
+
+`deploy.yml` applies it. Then read the record ACM wants:
+
+```bash
+terraform -chdir=infra output -json acm_validation_record
+```
+
+### Phase 2 - get the records into is-a.dev
+
+Open a PR against [`is-a-dev/register`](https://github.com/is-a-dev/register)
+adding **two** files under `domains/`:
+
+`domains/callback.json` - the site itself:
+
+```json
+{
+  "owner": { "username": "SaixAbhinav" },
+  "records": { "CNAME": "d1ukk616lu5bcc.cloudfront.net" }
+}
+```
+
+`domains/_<hash>.callback.json` - the ACM validation record, where
+`_<hash>` and the CNAME value both come from the `acm_validation_record`
+output above (strip the trailing `.is-a.dev.` from the record name to get
+the filename):
+
+```json
+{
+  "owner": { "username": "SaixAbhinav" },
+  "records": { "CNAME": "_<hash>.<something>.acm-validations.aws" }
+}
+```
+
+> **Both files must carry the same `owner.username`.** Their test suite
+> enforces that a nested subdomain (`_hash.callback`) is owned by the same
+> user as its parent (`callback`), and the PR fails CI otherwise. An
+> `owner.email` field is conventional in their repo but not required -
+> omit it if you'd rather not publish an address.
+
+### Phase 3 - activate
+
+Once that PR merges and DNS propagates, confirm ACM has issued:
+
+```bash
+terraform -chdir=infra output -raw acm_certificate_status
+```
+
+When it reads `ISSUED`, set `custom_domain_active = true` (in
+`variables.tf`'s default, or via `-var`) and apply. `terraform output -raw
+site_url` then prints the custom domain. If you flip it too early,
+`cloudfront.tf`'s precondition stops the apply with a message saying so
+rather than failing inside the CloudFront API.
+
+> **Do not delete the validation record after issuance.** ACM re-validates
+> through that same CNAME to auto-renew the certificate. Removing it once
+> the site is live doesn't break anything immediately - it breaks the
+> renewal, quietly, up to a year later.
+
 ## Monitoring (PR 5)
 
 `cloudwatch.tf` adds one SNS topic, one dashboard, and five alarms - all

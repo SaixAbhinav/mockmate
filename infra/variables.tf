@@ -19,6 +19,34 @@ variable "ecr_untagged_image_expiry_days" {
   default     = 14
 }
 
+variable "custom_domain" {
+  description = <<-EOT
+    Custom domain for the CloudFront distribution (ADR 0032). Setting it
+    creates an ACM certificate (acm.tf) and outputs the DNS validation
+    record to submit to the is-a.dev register repo. It does NOT put the
+    domain in front of the distribution on its own - that is
+    `custom_domain_active`, which is a separate, later apply. Set to ""
+    to disable the custom domain entirely.
+  EOT
+  type        = string
+  default     = "callback.is-a.dev"
+}
+
+variable "custom_domain_active" {
+  description = <<-EOT
+    Whether to attach `custom_domain` and its certificate to the
+    CloudFront distribution. Flip this to true ONLY after the certificate
+    has reached ISSUED (i.e. the is-a.dev PR carrying the validation CNAME
+    has merged and propagated) - CloudFront rejects a certificate that is
+    still PENDING_VALIDATION. cloudfront.tf asserts this with a
+    precondition so the failure is a readable message rather than an
+    opaque API error. While false, the distribution keeps serving on its
+    default *.cloudfront.net certificate.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "image_tag" {
   description = <<-EOT
     Tag (within the ecr.tf repository) of the backend image the Lambda
