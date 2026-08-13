@@ -104,68 +104,12 @@
   color: var(--text-dim);
 }
 
-/* ---- landing --------------------------------------------------------- */
-
-.hero {
-  position: relative;
-  overflow: hidden;
-  margin-bottom: var(--s6);
-}
-
-.hero-art {
-  position: absolute;
-  right: -32px;
-  top: 50%;
-  transform: translateY(-50%);
-  height: 300px;
-  opacity: 0.35;
-  pointer-events: none;
-}
-
-.hero-body {
-  position: relative;
-  max-width: 460px;
-}
-
-.kicker {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  margin-bottom: var(--s4);
-}
-
-.hero h1 {
-  font-size: clamp(2rem, 6vw, 3rem);
-  margin-bottom: var(--s4);
-}
-
-.landing .lede {
-  color: var(--text-muted);
-  margin-bottom: var(--s5);
-}
-
-.landing-steps {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 var(--s5);
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-  color: var(--text-muted);
-  font-size: 0.875rem;
-}
-
-.landing-steps li {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--s3);
-  padding-left: var(--s3);
-  border-left: 1px solid var(--border);
-}
-
 /* ---- start panel ----------------------------------------------------- */
+
+.start-title {
+  font-size: 1.5rem;
+  margin-bottom: var(--s2);
+}
 
 .start-panel {
   display: flex;
@@ -527,10 +471,6 @@ button.recording {
 @media (max-width: 640px) {
   .wrap { padding: var(--s4) var(--s3); }
   .messages { padding: var(--s4); gap: var(--s4); }
-}
-
-@media (max-width: 860px) {
-  .hero-art { display: none; }
 }
 
 @media (max-width: 900px) {

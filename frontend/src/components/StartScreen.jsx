@@ -1,5 +1,4 @@
 import { ErrorBanner } from './ErrorBanner'
-import heroArt from '../assets/hero-art.png'
 import mark from '../assets/mark.svg'
 
 export function StartScreen({
@@ -18,45 +17,20 @@ export function StartScreen({
   return (
     <main className="wrap">
       <header className="topbar">
-        <div className="brand">
+        <a className="brand" href="/">
           <span className="brand-name">Callback</span>
           <img className="brand-mark" src={mark} alt="" aria-hidden="true" />
           <span className="brand-tag">voice interview practice, in the open</span>
-        </div>
+        </a>
       </header>
 
       <ErrorBanner error={error} onDismiss={onDismissError} />
 
-      <div className="landing">
-        <section className="hero">
-          <img className="hero-art" src={heroArt} alt="" aria-hidden="true" />
-          <div className="hero-body">
-            <p className="kicker">Open source · self-hostable</p>
-            <h1>Sit the interview before it counts.</h1>
-            <p className="lede">
-              Upload a résumé and Callback builds an interview around it — an intro, a
-              résumé-grounded warm-up, then two sandboxed Python questions with an
-              interviewer watching as you type. You leave with a scored evaluation.
-            </p>
-          </div>
-        </section>
-
-        <ol className="landing-steps">
-          <li>Upload a résumé — optional, skip it for a general ML/GenAI interview</li>
-          <li>Answer out loud; the interviewer probes what you say</li>
-          <li>Solve two coding questions, then read your scored evaluation</li>
-        </ol>
-
-        <p className="hint">
-          Built in the open —{' '}
-          <a href="https://github.com/SaixAbhinav/mockmate" target="_blank" rel="noreferrer">
-            source and architecture decisions on GitHub
-          </a>
-          .
-        </p>
-      </div>
-
+      {/* The pitch lives on the landing page at "/" now (ADR 0033). Repeating
+          the hero here would mean reading the same headline twice to start one
+          interview, so this screen is only the thing it is named for. */}
       <section className="start-panel">
+        <h1 className="start-title">Start your interview</h1>
         <label className="resume-drop">
           <strong>{resumeName || 'Choose a résumé'}</strong>
           <span className="hint">

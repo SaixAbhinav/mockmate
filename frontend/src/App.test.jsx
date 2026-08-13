@@ -54,7 +54,7 @@ async function startInterview(mocks) {
 async function uploadResume(mocks, name = 'cv.pdf') {
   mocks.respond('/api/resume', { resume_id: 'r1' })
   const { container } = render(<App />)
-  await screen.findByText('Sit the interview before it counts.')
+  await screen.findByText('Start your interview')
   const input = container.querySelector('input[type="file"]')
   await userEvent.upload(input, new File(['cv'], name, { type: 'application/pdf' }))
   await screen.findByText(name)
@@ -68,9 +68,9 @@ describe('App', () => {
     baseRoutes(mocks)
   })
 
-  it('shows the landing screen with the product name', async () => {
+  it('shows the start screen with the product name', async () => {
     render(<App />)
-    expect(await screen.findByText('Sit the interview before it counts.')).toBeInTheDocument()
+    expect(await screen.findByText('Start your interview')).toBeInTheDocument()
     expect(screen.getAllByText('Callback').length).toBeGreaterThan(0)
   })
 
@@ -251,7 +251,7 @@ describe('App', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /start new interview/i }))
 
-    expect(screen.getByText('Sit the interview before it counts.')).toBeInTheDocument()
+    expect(screen.getByText('Start your interview')).toBeInTheDocument()
     expect(screen.queryByText('Tell me about yourself.')).not.toBeInTheDocument()
     expect(screen.queryByText('A solid interview overall.')).not.toBeInTheDocument()
     // Deliberate: the résumé survives, so a second interview needs no re-upload.

@@ -50,6 +50,7 @@ index that drifts from the ADRs is worse than no index.
 | [0030](0030-callback-rename-and-visual-system.md) | Callback — rename, and a monochrome visual system | accepted |
 | [0031](0031-least-privilege-ci-roles.md) | Split the CI role in two — main-only deploy, read-only PR plan | accepted · shipped · hardens [0029](0029-serverless-aws-deploy.md)'s PR 4 |
 | [0032](0032-custom-domain-free-subdomain.md) | A readable URL for free — `callback.is-a.dev` over CloudFront | accepted · in progress (phase 1 of 2) · extends [0029](0029-serverless-aws-deploy.md) |
+| [0033](0033-landing-page-second-entry.md) | The front door is a page, not the app | accepted · extends [0030](0030-callback-rename-and-visual-system.md)'s visual system |
 
 ## Open — decided direction, not yet closed out
 

@@ -1,0 +1,471 @@
+/* Landing page (ADR 0033). Built on the ADR 0030 token system: monochrome,
+   white on black, and no accent hue. The state colours (--pass, --fail,
+   --pending) are deliberately absent here - they mean "this test passed" and
+   nothing else, and spending them on marketing decoration is exactly what ADR
+   0030 forbids.
+
+   Two spacing steps larger than the app's scale are defined here, scoped to
+   this page. The app's --s1..--s8 top out at 64px, which is right for a dense
+   interview surface and too tight for a page whose job is to breathe. */
+.landing-page {
+  --s9: 96px;
+  --s10: 144px;
+  --measure: 62ch;
+  --edge: clamp(var(--s4), 5vw, var(--s8));
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  /* Anything wider and the hero's two columns drift apart on a large monitor. */
+  --page: 1200px;
+}
+
+.landing-page > main {
+  flex: 1;
+}
+
+/* Nav ---------------------------------------------------------------- */
+
+.lp-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s5);
+  height: 64px;
+  padding: 0 var(--edge);
+  max-width: var(--page);
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.lp-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  border-bottom: 0;
+  font-size: 0.9375rem;
+  letter-spacing: -0.01em;
+}
+
+.lp-brand img {
+  display: block;
+}
+
+.lp-nav-links {
+  display: flex;
+  align-items: center;
+  gap: var(--s5);
+  font-size: 0.875rem;
+}
+
+.lp-nav-links a:not(.lp-cta) {
+  color: var(--text-muted);
+  border-bottom: 0;
+}
+
+.lp-nav-links a:not(.lp-cta):hover {
+  color: var(--text);
+}
+
+/* Call to action ------------------------------------------------------ */
+
+.lp-cta {
+  display: inline-block;
+  padding: var(--s3) var(--s5);
+  border: 1px solid var(--text);
+  border-radius: var(--r);
+  background: var(--text);
+  /* The page background, so the label is near-black on white: the highest
+     contrast pair the monochrome system has. */
+  color: var(--bg);
+  font-size: 0.9375rem;
+  /* A CTA label must never wrap; these are two words and the button is free
+     to be as wide as it needs. */
+  white-space: nowrap;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.lp-cta:hover {
+  background: var(--text-bright);
+  border-color: var(--text-bright);
+}
+
+.lp-cta:active {
+  transform: translateY(1px);
+}
+
+.lp-cta-small {
+  padding: var(--s2) var(--s4);
+  font-size: 0.875rem;
+}
+
+.lp-link {
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-strong);
+  font-size: 0.9375rem;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.lp-link:hover {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+
+/* Shared section shell ------------------------------------------------ */
+
+.landing-page section {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: var(--s10) var(--edge);
+  box-sizing: border-box;
+}
+
+.landing-page h2 {
+  font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.125rem);
+  max-width: 20ch;
+}
+
+.landing-page p {
+  color: var(--text-muted);
+  max-width: var(--measure);
+}
+
+/* Hero ---------------------------------------------------------------- */
+
+/* Scoped through .landing-page so this beats the shared `.landing-page
+   section` padding shorthand above; a bare .lp-hero loses to it on
+   specificity and the hero silently keeps the tall section padding. */
+.landing-page .lp-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  align-items: center;
+  gap: var(--s8);
+  /* Capped well under the viewport so the CTA is never below the fold, and
+     kept off pt-24 territory so the copy does not float down the page. */
+  padding-top: var(--s8);
+  padding-bottom: var(--s9);
+  /* Deliberately short of a full viewport. The copy is centred in this box,
+     so an over-tall hero pushes the headline down the screen and reads as a
+     layout bug rather than as breathing room. */
+  min-height: min(66dvh, 560px);
+}
+
+.lp-eyebrow {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  /* --text-muted, not --text-dim: dim measures 2.9:1 against --bg and this is
+     all small text, which needs 4.5:1. Muted clears it at 5.7:1. */
+  color: var(--text-muted);
+  margin-bottom: var(--s5);
+}
+
+.lp-hero h1 {
+  /* Sized against the art beside it: at 3 lines this headline would crowd the
+     illustration, so the ceiling stays moderate. */
+  font-size: clamp(2.25rem, 1.4rem + 3.4vw, 3.75rem);
+  max-width: 15ch;
+}
+
+.lp-lede {
+  margin-top: var(--s5);
+  font-size: 1.0625rem;
+  max-width: 46ch;
+}
+
+.lp-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s5);
+  margin-top: var(--s7);
+}
+
+.lp-hero-art {
+  width: 100%;
+  height: auto;
+  max-height: 460px;
+  object-fit: contain;
+  /* The art is white line work on transparency; holding it just under full
+     strength keeps it from competing with the headline. */
+  opacity: 0.85;
+}
+
+/* Phases -------------------------------------------------------------- */
+
+.lp-phase-list {
+  list-style: none;
+  margin: var(--s8) 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+  /* A single hairline spine down the left, with each phase hanging off it.
+     One rule for the whole list rather than a border per row. */
+  border-left: 1px solid var(--border);
+}
+
+.lp-phase-list li {
+  padding: 0 0 var(--s7) var(--s6);
+  position: relative;
+}
+
+.lp-phase-list li:last-child {
+  padding-bottom: 0;
+}
+
+.lp-phase-list h3 {
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  margin-bottom: var(--s3);
+}
+
+/* The tick that ties each phase to the spine. Decoration, so it is hidden
+   from assistive technology by virtue of being a pseudo-element. */
+.lp-phase-list li::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 0.55em;
+  width: var(--s4);
+  height: 1px;
+  background: var(--border-strong);
+}
+
+/* Qualities grid ------------------------------------------------------ */
+
+.lp-grid {
+  margin-top: var(--s8);
+  display: grid;
+  /* Four items over a 3x2 field, laid out so every cell is occupied:
+     the lead tile takes two columns of the top row, the tall tile takes the
+     third column across both rows, and the two short tiles fill the rest.
+     Nothing is padded out with a blank tile to make the grid come out even. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s5);
+}
+
+.lp-tile {
+  padding: var(--s6);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+
+.lp-tile h3 {
+  margin-bottom: var(--s3);
+  font-size: 1.0625rem;
+}
+
+.lp-tile p {
+  font-size: 0.9375rem;
+}
+
+.lp-tile-wide {
+  grid-column: span 2;
+  background: var(--surface-2);
+}
+
+.lp-tile-tall {
+  grid-column: 3;
+  grid-row: span 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.lp-tile-narrow {
+  background: transparent;
+}
+
+/* Architecture -------------------------------------------------------- */
+
+.lp-architecture {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--s8);
+  align-items: start;
+}
+
+.lp-arch-copy p {
+  margin-top: var(--s5);
+}
+
+.lp-arch-links {
+  margin-top: var(--s6);
+}
+
+.lp-spec {
+  margin: 0;
+  display: grid;
+  gap: var(--s5);
+}
+
+.lp-spec > div {
+  display: grid;
+  gap: var(--s2);
+  padding-top: var(--s5);
+  /* One rule above each entry rather than a box around every one. */
+  border-top: 1px solid var(--border);
+}
+
+.lp-spec dt {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  /* --text-muted, not --text-dim: dim measures 2.9:1 against --bg and this is
+     all small text, which needs 4.5:1. Muted clears it at 5.7:1. */
+  color: var(--text-muted);
+}
+
+.lp-spec dd {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+/* Close --------------------------------------------------------------- */
+
+.lp-close {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s5);
+  border-top: 1px solid var(--border);
+}
+
+.lp-close h2 {
+  max-width: none;
+}
+
+.lp-close p {
+  max-width: 52ch;
+}
+
+.lp-close .lp-cta {
+  margin-top: var(--s3);
+}
+
+.lp-note {
+  font-size: 0.875rem;
+  /* --text-muted, not --text-dim: dim measures 2.9:1 against --bg and this is
+     all small text, which needs 4.5:1. Muted clears it at 5.7:1. */
+  color: var(--text-muted);
+}
+
+/* Footer -------------------------------------------------------------- */
+
+.lp-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s5);
+  max-width: var(--page);
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--s5) var(--edge) var(--s7);
+  box-sizing: border-box;
+  font-size: 0.875rem;
+  /* --text-muted, not --text-dim: dim measures 2.9:1 against --bg and this is
+     all small text, which needs 4.5:1. Muted clears it at 5.7:1. */
+  color: var(--text-muted);
+}
+
+.lp-footer a {
+  color: var(--text-muted);
+  border-bottom: 0;
+}
+
+.lp-footer a:hover {
+  color: var(--text);
+}
+
+/* Reveal -------------------------------------------------------------- */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.reveal.is-shown {
+  opacity: 1;
+  transform: none;
+}
+
+/* Mobile -------------------------------------------------------------- */
+
+@media (max-width: 767px) {
+  .landing-page {
+    --s10: 88px;
+  }
+
+  /* Scoped to match the base rules' specificity - a bare .lp-hero here loses
+     to `.landing-page .lp-hero` above and the two columns survive onto a
+     phone, squeezing the headline into a 166px gutter. */
+  .landing-page .lp-hero,
+  .landing-page .lp-architecture {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-page .lp-hero {
+    gap: var(--s7);
+    min-height: 0;
+    padding-top: var(--s6);
+  }
+
+  /* The 15ch measure is narrower than a phone column, so it adds line breaks
+     the width did not ask for. Let the headline use the column it has. */
+  .lp-hero h1,
+  .lp-lede {
+    max-width: none;
+  }
+
+  /* Below the copy on a phone: the headline and the CTA come first. */
+  .lp-hero-art {
+    order: 2;
+    max-height: 260px;
+  }
+
+  .landing-page .lp-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-tile-wide,
+  .lp-tile-tall {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .lp-nav {
+    gap: var(--s4);
+  }
+
+  .lp-nav-links {
+    gap: var(--s4);
+  }
+}
+
+/* Motion is decoration here, so it is the first thing to go. */
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .lp-cta,
+  .lp-link {
+    transition: none;
+  }
+
+  .lp-cta:active {
+    transform: none;
+  }
+}
