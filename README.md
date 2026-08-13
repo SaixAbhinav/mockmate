@@ -44,9 +44,13 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 — works in any browser (speech-to-text is
-server-side now, not the browser's own speech API); the text box is always
-available as a fallback.
+Open http://localhost:5173 for the landing page, or go straight to the interview
+at http://localhost:5173/app.html. Those are two separate HTML entry points
+rather than client-side routes ([ADR 0033](docs/decisions/0033-landing-page-second-entry.md)),
+so both resolve on a refresh without any rewrite.
+
+Works in any browser (speech-to-text is server-side now, not the browser's own
+speech API); the text box is always available as a fallback.
 
 ## LLM setup (optional)
 
@@ -93,7 +97,8 @@ authorship.
 
 ## Deploying
 
-Live at **https://d1ukk616lu5bcc.cloudfront.net**.
+Live at **https://d1ukk616lu5bcc.cloudfront.net** — the landing page at `/`, the
+interview itself at `/app.html` ([ADR 0033](docs/decisions/0033-landing-page-second-entry.md)).
 
 Deployed serverless on AWS
 ([ADR 0029](docs/decisions/0029-serverless-aws-deploy.md)), defined entirely in
