@@ -248,16 +248,20 @@ AWS deploy:
 4. GitHub Actions OIDC pipeline (`plan` on PR, `apply` on merge).
 5. CloudWatch dashboard/alarms + README/deploy docs (this PR).
 
-**Live now**, confirmed via infra/README.md's smoke test: the backend — Lambda,
-API Gateway, DynamoDB, and SSM Parameter Store — answers `/api/health` with both
-provider keys loaded from SSM.
+**Fully live on AWS, and the supersession of [ADR 0025](0025-deploy-render-static-plus-api.md)'s
+host is complete.** The CloudFront-account verification that held PR 3 back has
+since cleared, the distribution was created, and `deploy.yml` has been applying
+the whole stack — including the frontend sync and invalidation — on every merge
+to `main` since. Verified end to end against the live distribution:
 
-**The CloudFront/S3 frontend (PR 3) is written and reviewed but not yet applied:**
-new AWS accounts must be verified by AWS Support before they can create CloudFront
-distributions, and that request is pending. So the supersession of ADR 0025's host
-is **in progress, not complete** — the backend host is already AWS; the frontend
-host flips to CloudFront once verification clears. See
-[0025](0025-deploy-render-static-plus-api.md)'s Status for its side of this.
+| Check | Result |
+|---|---|
+| `GET /` (SPA from S3 via CloudFront) | 200 |
+| `GET /api/health` (same origin → API Gateway → Lambda) | 200, `{"status":"ok","provider":"groq+gemini"}` |
+| `terraform apply` in CI | clean — `0 added, 0 changed, 0 destroyed` |
+
+Both halves through one CloudFront origin, so the no-production-CORS property
+this ADR carried over from 0025 holds in the deployed system, not just on paper.
 
 **Consciously deferred, not forgotten:**
 

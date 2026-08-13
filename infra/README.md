@@ -252,11 +252,11 @@ PR 4 automates this sequence as CI.
 
 ### Cutover note
 
-Once this distribution is live and the frontend uploaded, the AWS deploy
-supersedes [ADR 0025](../docs/decisions/0025-deploy-render-static-plus-api.md)'s
-Render host, per ADR 0029's status section. Updating that ADR's (and the
-decisions index's) status to reflect the supersession is PR 5's docs step,
-not this one.
+Done. The distribution is live, the frontend is served from it, and the AWS
+deploy has superseded
+[ADR 0025](../docs/decisions/0025-deploy-render-static-plus-api.md)'s Render
+host in full — both ADRs' statuses and the decisions index say so. Render stays
+documented as the fallback, not the live host.
 
 ## Custom domain (ADR 0032)
 
