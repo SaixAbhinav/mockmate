@@ -21,27 +21,27 @@ variable "ecr_untagged_image_expiry_days" {
 
 variable "custom_domain" {
   description = <<-EOT
-    Custom domain for the CloudFront distribution (ADR 0032). Setting it
-    creates an ACM certificate (acm.tf) and outputs the DNS validation
-    record to submit to the is-a.dev register repo. It does NOT put the
-    domain in front of the distribution on its own - that is
-    `custom_domain_active`, which is a separate, later apply. Set to ""
-    to disable the custom domain entirely.
+    Apex domain the app is served at, e.g. "callback.me" (ADR 0034). Setting
+    it creates a Route 53 hosted zone, an ACM certificate, and the DNS
+    records that validate it - but does NOT put the domain in front of the
+    distribution. That is `custom_domain_active`, a second apply, run once
+    the registrar points at this zone's nameservers. Empty disables the
+    custom domain entirely, which is the state before a domain is
+    registered.
   EOT
   type        = string
-  default     = "callback.is-a.dev"
+  default     = ""
 }
 
 variable "custom_domain_active" {
   description = <<-EOT
-    Whether to attach `custom_domain` and its certificate to the
-    CloudFront distribution. Flip this to true ONLY after the certificate
-    has reached ISSUED (i.e. the is-a.dev PR carrying the validation CNAME
-    has merged and propagated) - CloudFront rejects a certificate that is
-    still PENDING_VALIDATION. cloudfront.tf asserts this with a
-    precondition so the failure is a readable message rather than an
-    opaque API error. While false, the distribution keeps serving on its
-    default *.cloudfront.net certificate.
+    Whether to attach `custom_domain` and its certificate to the CloudFront
+    distribution. Flip to true only after the registrar's nameservers point
+    at this zone (`terraform output route53_name_servers`) and the
+    certificate has reached ISSUED - CloudFront rejects one that has not.
+    cloudfront.tf asserts this with a precondition so the failure is a
+    readable message rather than an opaque API error. While false, the
+    distribution keeps serving on its default *.cloudfront.net certificate.
   EOT
   type        = bool
   default     = false

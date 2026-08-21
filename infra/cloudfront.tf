@@ -89,10 +89,10 @@ resource "aws_cloudfront_distribution" "frontend" {
     }
   }
 
-  # Custom domain (ADR 0032), off until phase 2 - see acm.tf for why the
-  # cutover is two applies. While inactive this is empty and the block
-  # below serves the default *.cloudfront.net certificate, exactly as
-  # before.
+  # Custom domain (ADR 0032, retargeted by ADR 0034), off until phase 2 -
+  # see route53.tf for why the cutover is two applies. While inactive this
+  # is empty and the block below serves the default *.cloudfront.net
+  # certificate, exactly as before.
   aliases = local.custom_domain_active ? [var.custom_domain] : []
 
   # Exactly one of these two renders: the for_each expressions are
@@ -103,7 +103,10 @@ resource "aws_cloudfront_distribution" "frontend" {
   dynamic "viewer_certificate" {
     for_each = local.custom_domain_active ? [1] : []
     content {
-      acm_certificate_arn = aws_acm_certificate.frontend[0].arn
+      # The validation resource's arn, not the certificate's own, so
+      # Terraform cannot attach a certificate before it has been proven
+      # issued. Same ARN, ordered dependency.
+      acm_certificate_arn = aws_acm_certificate_validation.frontend[0].certificate_arn
       ssl_support_method  = "sni-only"
       # TLS 1.2+ only. The default (TLSv1) is weaker than anything this
       # app's browsers need.
@@ -119,15 +122,16 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   # Turns the most likely operator mistake - flipping
-  # custom_domain_active before the is-a.dev PR merged and the cert
-  # issued - into a sentence instead of an opaque CloudFront API error.
+  # custom_domain_active before the registrar's nameservers point at this
+  # zone, so the certificate never validated - into a sentence instead of
+  # an opaque CloudFront API error.
   lifecycle {
     precondition {
       condition = !local.custom_domain_active || (
         length(aws_acm_certificate.frontend) > 0 &&
         aws_acm_certificate.frontend[0].status == "ISSUED"
       )
-      error_message = "custom_domain_active is true but the ACM certificate for ${var.custom_domain} is not ISSUED yet. Merge the is-a.dev PR carrying the validation CNAME (terraform output acm_validation_record), wait for it to propagate, then re-apply."
+      error_message = "custom_domain_active is true but the ACM certificate for ${var.custom_domain} is not ISSUED yet. Point the registrar at this zone's nameservers (terraform output route53_name_servers), wait for delegation to resolve, then re-apply."
     }
   }
 
