@@ -1,6 +1,6 @@
 # ADR 0032: A readable URL for free — `callback.is-a.dev` over CloudFront
 
-Date: 2026-08-13 · Status: accepted · in progress (phase 1 of 2) · Extends [0029](0029-serverless-aws-deploy.md)
+Date: 2026-08-13 · Status: **superseded by [0034](0034-registered-domain-over-free-subdomain.md)** · Extended [0029](0029-serverless-aws-deploy.md)
 
 ## Context
 
@@ -140,6 +140,26 @@ abandoned is-a.dev PR degrades to "no change" rather than to an outage.
   project sees, and 0029 exists to be read.
 - **`aws_acm_certificate_validation` with a long timeout.** Rejected above: it
   blocks CI and holds the state lock across a human-scale wait.
+
+## Superseded
+
+**The is-a.dev request was denied and closed on 2026-08-15**, by their review
+bot, on the ground that root subdomains must be related to software
+development. The subdomain is unclaimed again and the certificate this ADR
+created was left in `PENDING_VALIDATION`.
+
+The fallback designed here worked exactly as intended: `custom_domain_active`
+was still `false`, so the distribution kept serving its own certificate and
+nothing broke. [ADR 0034](0034-registered-domain-over-free-subdomain.md)
+replaces the domain and the DNS with a registered domain from the GitHub
+Student Developer Pack and a Route 53 zone. The certificate wiring and the
+two-phase gate below survive that change almost intact; what changes is who
+creates the validation record, and therefore that
+`aws_acm_certificate_validation` becomes usable where this ADR rejected it.
+
+The risk this ADR named and accepted is the one that came true: *"a dependency
+on a volunteer-run service"* and DNS records living *"in a third party's Git
+repository rather than in `infra/`"*. Left below as written.
 
 ## Status
 

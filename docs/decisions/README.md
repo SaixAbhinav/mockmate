@@ -49,8 +49,9 @@ index that drifts from the ADRs is worse than no index.
 | [0029](0029-serverless-aws-deploy.md) | Serverless AWS deploy — Terraform IaC and idempotent state at scale | accepted · shipped · live on AWS · supersedes [0025](0025-deploy-render-static-plus-api.md)'s host |
 | [0030](0030-callback-rename-and-visual-system.md) | Callback — rename, and a monochrome visual system | accepted |
 | [0031](0031-least-privilege-ci-roles.md) | Split the CI role in two — main-only deploy, read-only PR plan | accepted · shipped · hardens [0029](0029-serverless-aws-deploy.md)'s PR 4 |
-| [0032](0032-custom-domain-free-subdomain.md) | A readable URL for free — `callback.is-a.dev` over CloudFront | accepted · in progress (phase 1 of 2) · extends [0029](0029-serverless-aws-deploy.md) |
+| [0032](0032-custom-domain-free-subdomain.md) | A readable URL for free — `callback.is-a.dev` over CloudFront | superseded by [0034](0034-registered-domain-over-free-subdomain.md) — the is-a.dev request was denied |
 | [0033](0033-landing-page-second-entry.md) | The front door is a page, not the app | accepted · extends [0030](0030-callback-rename-and-visual-system.md)'s visual system |
+| [0034](0034-registered-domain-over-free-subdomain.md) | Buy the name with a student benefit, and own the DNS | accepted · in progress (phase 1 of 2) · supersedes [0032](0032-custom-domain-free-subdomain.md)'s domain and DNS |
 
 ## Open — decided direction, not yet closed out
 

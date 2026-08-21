@@ -258,86 +258,74 @@ deploy has superseded
 host in full — both ADRs' statuses and the decisions index say so. Render stays
 documented as the fallback, not the live host.
 
-## Custom domain (ADR 0032)
+## Custom domain (ADR 0034)
 
-`acm.tf` plus the guarded `aliases`/`viewer_certificate` wiring in
-`cloudfront.tf` put the app at **`https://callback.is-a.dev`** instead of
-the AWS-assigned `d1ukk616lu5bcc.cloudfront.net`. DNS is hosted free by
-[is-a.dev](https://github.com/is-a-dev/register), whose records are added
-by **pull request to their repo** - which is why the cutover is two
-applies rather than one. See
-[ADR 0032](../docs/decisions/0032-custom-domain-free-subdomain.md) for the
-reasoning; the mechanics are below.
+`route53.tf`, `acm.tf` and the guarded `aliases`/`viewer_certificate` wiring
+in `cloudfront.tf` put the app at a registered domain instead of the
+AWS-assigned `d1ukk616lu5bcc.cloudfront.net`.
+
+[ADR 0032](../docs/decisions/0032-custom-domain-free-subdomain.md) originally
+used a free `is-a.dev` subdomain; **that request was denied by their
+reviewers**, so [ADR 0034](../docs/decisions/0034-registered-domain-over-free-subdomain.md)
+switched to a domain registered through the GitHub Student Developer Pack,
+with DNS in a Route 53 hosted zone. The practical difference is that the
+validation record is now created by Terraform rather than by a pull request
+against someone else's repository.
 
 Two variables gate it (`variables.tf`):
 
 | Variable | Default | Effect |
 |---|---|---|
-| `custom_domain` | `callback.is-a.dev` | Creates the ACM certificate and outputs its validation record. Attaches nothing. `""` disables the domain entirely. |
-| `custom_domain_active` | `false` | Attaches the alias + certificate to the distribution. Flip only once the certificate reads `ISSUED`. |
+| `custom_domain` | `""` | Set to the registered apex (e.g. `callback.me`). Creates the hosted zone, the ACM certificate and its validation record. Attaches nothing. |
+| `custom_domain_active` | `false` | Waits for the certificate and puts the domain in front of the distribution. Flip only after delegation resolves. |
 
-While `custom_domain_active` is `false`, the distribution serves its
-default `*.cloudfront.net` certificate exactly as before - so a stalled
-is-a.dev PR is a no-op, not an outage.
+While `custom_domain_active` is `false` the distribution serves its default
+`*.cloudfront.net` certificate, so a half-finished cutover is a no-op rather
+than an outage.
 
-### Phase 1 - create the certificate (done by merging to `main`)
+### Phase 1 - zone and certificate
 
-`deploy.yml` applies it. Then read the record ACM wants:
+Set `custom_domain` and apply. Nothing blocks: the certificate sits
+`PENDING_VALIDATION` until the domain is delegated.
 
 ```bash
-terraform -chdir=infra output -json acm_validation_record
+terraform -chdir=infra output -json route53_name_servers
 ```
 
-### Phase 2 - get the records into is-a.dev
+### Phase 2 - delegate at the registrar
 
-Open a PR against [`is-a-dev/register`](https://github.com/is-a-dev/register)
-adding **two** files under `domains/`:
+Paste those four nameservers into the registrar's "custom DNS" setting for the
+domain, replacing its default ones. This is the step that makes the zone
+authoritative; until it is done ACM cannot validate and nothing resolves.
 
-`domains/callback.json` - the site itself:
-
-```json
-{
-  "owner": { "username": "SaixAbhinav" },
-  "records": { "CNAME": "d1ukk616lu5bcc.cloudfront.net" }
-}
-```
-
-`domains/_<hash>.callback.json` - the ACM validation record, where
-`_<hash>` and the CNAME value both come from the `acm_validation_record`
-output above (strip the trailing `.is-a.dev.` from the record name to get
-the filename):
-
-```json
-{
-  "owner": { "username": "SaixAbhinav" },
-  "records": { "CNAME": "_<hash>.<something>.acm-validations.aws" }
-}
-```
-
-> **Both files must carry the same `owner.username`.** Their test suite
-> enforces that a nested subdomain (`_hash.callback`) is owned by the same
-> user as its parent (`callback`), and the PR fails CI otherwise. An
-> `owner.email` field is conventional in their repo but not required -
-> omit it if you'd rather not publish an address.
-
-### Phase 3 - activate
-
-Once that PR merges and DNS propagates, confirm ACM has issued:
+Delegation usually takes minutes. Confirm with:
 
 ```bash
 terraform -chdir=infra output -raw acm_certificate_status
 ```
 
-When it reads `ISSUED`, set `custom_domain_active = true` (in
-`variables.tf`'s default, or via `-var`) and apply. `terraform output -raw
-site_url` then prints the custom domain. If you flip it too early,
-`cloudfront.tf`'s precondition stops the apply with a message saying so
-rather than failing inside the CloudFront API.
+### Phase 3 - activate
 
-> **Do not delete the validation record after issuance.** ACM re-validates
-> through that same CNAME to auto-renew the certificate. Removing it once
-> the site is live doesn't break anything immediately - it breaks the
-> renewal, quietly, up to a year later.
+When that reads `ISSUED`, set `custom_domain_active = true` and apply. This
+creates the apex alias record and attaches the certificate.
+
+```bash
+terraform -chdir=infra apply
+terraform -chdir=infra output -raw site_url
+```
+
+If you flip the flag too early, `cloudfront.tf`'s precondition stops the apply
+with a message naming the next action rather than failing inside the
+CloudFront API.
+
+> **Renewal is automatic now, but the registration is not.** ACM re-validates
+> through the Route 53 record Terraform owns, so the certificate renews itself.
+> The *domain* still expires: the Student Pack covers year one only, and a
+> lapsed domain on a résumé is worse than none.
+
+> **The hosted zone costs $0.50/month** - the first standing charge on this
+> project, and the one place ADR 0029's ~$0/month bound is knowingly broken.
+> ADR 0034 argues why.
 
 ## Monitoring (PR 5)
 
