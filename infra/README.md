@@ -258,10 +258,18 @@ deploy has superseded
 host in full — both ADRs' statuses and the decisions index say so. Render stays
 documented as the fallback, not the live host.
 
-## Custom domain (ADR 0034)
+## Custom domain (ADR 0034) - built, not in use
+
+> **There is no custom domain, and this is switched off.** `custom_domain`
+> defaults to `""`, so none of the resources below are created and the app
+> serves from `d1ukk616lu5bcc.cloudfront.net`. That is a decision, not an
+> unfinished migration - see
+> [ADR 0034](../docs/decisions/0034-registered-domain-over-free-subdomain.md).
+> The steps here are kept because the code is written and reviewed; they are
+> what to do *if* a domain is ever registered.
 
 `route53.tf`, `acm.tf` and the guarded `aliases`/`viewer_certificate` wiring
-in `cloudfront.tf` put the app at a registered domain instead of the
+in `cloudfront.tf` would put the app at a registered domain instead of the
 AWS-assigned `d1ukk616lu5bcc.cloudfront.net`.
 
 [ADR 0032](../docs/decisions/0032-custom-domain-free-subdomain.md) originally
