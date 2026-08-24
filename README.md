@@ -72,7 +72,7 @@ uv pip install -r requirements-dev.txt
 uv run pytest
 ```
 
-284 passed.
+329 passed. The frontend suite (`npm test --prefix frontend`) adds 97.
 
 ## Generating questions (dev chore)
 
@@ -99,6 +99,8 @@ authorship.
 
 Live at **https://d1ukk616lu5bcc.cloudfront.net** — the landing page at `/`, the
 interview itself at `/app.html` ([ADR 0033](docs/decisions/0033-landing-page-second-entry.md)).
+There is no custom domain, by choice rather than by omission
+([ADR 0034](docs/decisions/0034-registered-domain-over-free-subdomain.md)).
 
 Deployed serverless on AWS
 ([ADR 0029](docs/decisions/0029-serverless-aws-deploy.md)), defined entirely in
