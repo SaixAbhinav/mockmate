@@ -1,6 +1,6 @@
 # ADR 0034: Buy the name with a student benefit, and own the DNS
 
-Date: 2026-08-21 · Status: accepted · in progress (phase 1 of 2) · Supersedes [0032](0032-custom-domain-free-subdomain.md)'s domain and DNS
+Date: 2026-08-21 · Status: **not pursued** · the CloudFront URL is the standing choice · Superseded [0032](0032-custom-domain-free-subdomain.md)'s domain and DNS
 
 ## Context
 
@@ -134,16 +134,29 @@ without the extra lookup a CNAME costs.
 
 ## Status
 
-**Phase 1 is this PR**, and it is inert until a domain exists: `custom_domain`
-defaults to `""`, so the plan creates no zone and destroys the stranded
-certificate. `terraform validate` passes.
+**Not pursued. The app stays at its CloudFront URL, and that is now a decision
+rather than a default.**
 
-**Phase 2, once the domain is registered:**
+Phase 1 shipped and is on `main`: `route53.tf`, the certificate wiring, and the
+two gating variables are all in place, and the stranded ADR 0032 certificate was
+destroyed by the apply that merged it. Phase 2 was never run. **Nothing is
+half-configured** - `custom_domain` defaults to `""`, so the stack plans clean
+and creates no zone, no certificate, and no charge.
 
-1. Set `custom_domain` to the registered apex, apply.
-2. `terraform output route53_name_servers`, paste the four values into the
-   registrar as custom DNS.
-3. Wait for delegation, then confirm `terraform output acm_certificate_status`
-   reads `ISSUED`.
-4. Set `custom_domain_active = true`, apply. `terraform output -raw site_url`
-   then prints the real URL.
+The reason is worth recording honestly, because it is not a technical one: after
+[ADR 0032](0032-custom-domain-free-subdomain.md)'s denial and the work of
+re-planning around a registered domain, the remaining benefit did not justify
+more time on it. A custom domain was always cosmetic. The deploy, the Terraform
+and the CI split are what this project is meant to demonstrate, and none of them
+depend on the name in front.
+
+**What it would cost to finish**, if this is ever picked up again: register a
+domain, then the four steps in `infra/README.md`. The code is already written
+and `terraform validate` passes, so the work is a variable and two applies, not
+a rebuild. `callback.me` was unregistered as of 2026-08-21.
+
+**What was deliberately left in place rather than reverted:** `route53.tf`,
+`acm.tf` and the `custom_domain` variables. Deleting them would throw away
+working, reviewed code to save nothing, since inert `count = 0` resources cost
+nothing and change no plan. They are the finished half of a decision that was
+stopped, not dead code.
