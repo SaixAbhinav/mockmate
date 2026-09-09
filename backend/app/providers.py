@@ -505,11 +505,18 @@ def _parse_assessment(content: str) -> Assessment:
 
 
 class GroqProvider:
-    """Groq's OpenAI-compatible endpoint. Free tier, 70B-class models."""
+    """Groq's OpenAI-compatible endpoint. Free tier.
+
+    Model IDs here are perishable. Groq retires models on its own schedule and
+    the endpoint answers a retired one with 404, which reaches this app as a
+    ProviderUnavailableError and, once the fallback fails too, a 503 to the
+    Candidate. That is what happened to llama-3.3-70b-versatile. When it
+    happens again, `GET /openai/v1/models` lists what is actually served.
+    """
 
     name = "groq"
     _url = "https://api.groq.com/openai/v1/chat/completions"
-    _model = "llama-3.3-70b-versatile"
+    _model = "openai/gpt-oss-120b"
 
     def __init__(self, api_key: str):
         self._api_key = api_key
@@ -634,10 +641,17 @@ class GroqProvider:
 
 
 class GeminiProvider:
-    """Google Gemini REST API. Free tier."""
+    """Google Gemini REST API. Free tier.
+
+    Same perishability as the Groq model above: gemini-2.0-flash was retired
+    and started answering 404. `GET /v1beta/models` lists the live ones, and
+    only those advertising generateContent are usable here. Stable ids are
+    preferred over -preview and -latest: preview models disappear, and
+    -latest silently moves under the app.
+    """
 
     name = "gemini"
-    _model = "gemini-2.0-flash"
+    _model = "gemini-2.5-flash"
 
     def __init__(self, api_key: str):
         self._api_key = api_key

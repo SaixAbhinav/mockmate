@@ -151,6 +151,16 @@ async def test_groq_http_error_raises_provider_unavailable(fake_groq_client):
         await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
 
 
+async def test_groq_retired_model_404_raises_provider_unavailable(fake_groq_client):
+    # A model Groq has retired answers 404, not 429. Both must reach the caller
+    # as "unavailable" so failover gets its turn: this is the shape that took
+    # the live site down when llama-3.3-70b-versatile was decommissioned.
+    fake_groq_client.response = FakeResponse({"error": "model not found"}, status_code=404)
+    provider = GroqProvider(api_key="fake-key")
+    with pytest.raises(ProviderUnavailableError):
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+
+
 async def test_groq_unexpected_response_shape_raises_provider_malformed(fake_groq_client):
     fake_groq_client.response = FakeResponse({"unexpected": "shape"})
     provider = GroqProvider(api_key="fake-key")
@@ -171,6 +181,16 @@ async def test_gemini_http_error_raises_provider_unavailable_without_leaking_key
     message = str(exc_info.value)
     assert "429" in message
     assert "secret-test-key-12345" not in message
+
+
+async def test_gemini_retired_model_404_raises_provider_unavailable(fake_gemini_client):
+    # The fallback half of the same failure: when both providers 404 on a
+    # retired model, main.py turns it into the 503 the Candidate sees.
+    fake_gemini_client.response = FakeResponse({"error": "model not found"}, status_code=404)
+    provider = GeminiProvider(api_key="secret-test-key-12345")
+    with pytest.raises(ProviderUnavailableError) as exc_info:
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+    assert "secret-test-key-12345" not in str(exc_info.value)
 
 
 def test_both_failure_types_are_provider_errors():
