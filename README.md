@@ -72,7 +72,8 @@ uv pip install -r requirements-dev.txt
 uv run pytest
 ```
 
-329 passed. The frontend suite (`npm test --prefix frontend`) adds 97.
+331 passed. The frontend suite (`npm test --prefix frontend`) adds 97; it needs
+Node 22.22+ or 24.15+ (jsdom's floor), newer than the app itself.
 
 ## Generating questions (dev chore)
 
