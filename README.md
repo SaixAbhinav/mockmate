@@ -72,7 +72,7 @@ uv pip install -r requirements-dev.txt
 uv run pytest
 ```
 
-329 passed. The frontend suite (`npm test --prefix frontend`) adds 97.
+331 passed. The frontend suite (`npm test --prefix frontend`) adds 97.
 
 ## Generating questions (dev chore)
 
