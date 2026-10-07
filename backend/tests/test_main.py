@@ -1,4 +1,6 @@
+import json
 import logging
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1008,3 +1010,90 @@ def test_api_advertises_the_product_name():
     from app.main import app
 
     assert app.title == "Callback"
+
+
+# --- skip to the coding round (ADR 0035) ---
+
+
+def _skip(client, session_id):
+    return client.post(f"/api/session/{session_id}/skip-to-code", json={})
+
+
+def test_skip_to_code_opens_the_first_coding_question(client):
+    session_id = client.post("/api/session", json={}).json()["session_id"]
+
+    resp = _skip(client, session_id)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["stage"] == "dsa"
+    assert data["phase"] == "advancing"
+    assert data["dsa"]["function_name"]
+    assert data["reply"].startswith("Sure, skipping ahead to the coding round.")
+    assert data["audio_b64"]
+    assert (data["question_number"], data["total_questions"]) == (5, 6)
+
+
+def test_skip_to_code_works_mid_warm_up(client):
+    session_id = client.post("/api/session", json={}).json()["session_id"]
+    client.post(f"/api/session/{session_id}/answer", json={"transcript": "about me"})
+
+    resp = _skip(client, session_id)
+
+    assert resp.status_code == 200
+    assert resp.json()["stage"] == "dsa"
+
+
+def test_skip_to_code_on_a_coding_question_returns_409(client):
+    session_id = client.post("/api/session", json={}).json()["session_id"]
+    _skip(client, session_id)
+
+    assert _skip(client, session_id).status_code == 409
+
+
+def test_skip_to_code_after_the_session_is_done_returns_409(client):
+    session_id = _finish_session(client)
+
+    assert _skip(client, session_id).status_code == 409
+
+
+def test_skip_to_code_unknown_session_returns_404(client):
+    assert _skip(client, "does-not-exist").status_code == 404
+
+
+def test_evaluation_after_a_skip_reports_the_warm_up_as_skipped(client):
+    session_id = client.post("/api/session", json={}).json()["session_id"]
+    client.post(f"/api/session/{session_id}/answer", json={"transcript": "about me"})
+    client.post(f"/api/session/{session_id}/answer", json={"transcript": "warm-up answer"})
+    _skip(client, session_id)
+    _drive_to_done(client, session_id)
+
+    data = client.get(f"/api/session/{session_id}/evaluation").json()
+
+    assert [q["skipped"] for q in data["questions"]] == [False, True, True]
+    assert data["coverage"] == {"answered": 1, "total": 3}
+    assert len(data["dsa"]["questions"]) == 2
+
+
+# --- the landing page's sample scorecard ---
+
+SAMPLE_EVALUATION = (
+    Path(__file__).resolve().parents[2] / "frontend" / "src" / "landing" / "sampleEvaluation.json"
+)
+
+
+def test_landing_sample_scorecard_matches_the_evaluation_response():
+    """The landing page renders the real Evaluation component from fixed data.
+    Validating it against the API's own model means a change to the
+    Evaluation's shape fails here instead of leaving a stale sample live."""
+    from app.main import DsaQuestionScore, EvaluationResponse, QuestionScore
+
+    sample = json.loads(SAMPLE_EVALUATION.read_text(encoding="utf-8"))
+
+    EvaluationResponse.model_validate(sample)
+    # model_validate ignores unknown keys; the sample must not invent any.
+    assert set(sample) == set(EvaluationResponse.model_fields)
+    for q in sample["questions"]:
+        assert set(q) <= set(QuestionScore.model_fields)
+    for q in sample["dsa"]["questions"]:
+        assert set(q) <= set(DsaQuestionScore.model_fields)

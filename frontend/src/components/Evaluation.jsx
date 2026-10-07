@@ -1,4 +1,5 @@
 import { ScoreRow } from './ScoreRow'
+import './Evaluation.css'
 
 export function Evaluation({ evaluation }) {
   return (

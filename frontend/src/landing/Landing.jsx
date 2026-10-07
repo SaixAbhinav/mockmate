@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useApiReady } from '../hooks/useApiReady'
+import { Evaluation } from '../components/Evaluation'
+import sampleEvaluation from './sampleEvaluation.json'
 import heroArt from '../assets/hero-art.png'
 import mark from '../assets/mark.svg'
 import './landing.css'
@@ -99,6 +101,43 @@ const QUALITIES = [
   },
 ]
 
+// The real Evaluation component, fed fixed data that a backend test validates
+// against the API's own EvaluationResponse model - so the sample can't drift
+// from what a Candidate actually receives. Folded by default: the whole card is
+// taller than a screen, and the summary is what sells it.
+function SampleScorecard() {
+  const [open, setOpen] = useState(false)
+  return (
+    <Reveal className="lp-scorecard" aria-labelledby="scorecard-heading">
+      <h2 id="scorecard-heading">What you walk away with.</h2>
+      <p>
+        Every Session ends in a scorecard like this one: rubric scores for what you said,
+        real test results for your code, and the hints you used, counted.
+      </p>
+      <figure
+        className={`lp-scorecard-frame ${open ? 'is-open' : ''}`.trim()}
+        aria-labelledby="scorecard-caption"
+      >
+        <figcaption id="scorecard-caption" className="lp-scorecard-caption">
+          Example scorecard · sample data
+        </figcaption>
+        <div id="scorecard-body" className="lp-scorecard-body">
+          <Evaluation evaluation={sampleEvaluation} />
+        </div>
+      </figure>
+      <button
+        type="button"
+        className="lp-link lp-scorecard-toggle"
+        aria-expanded={open}
+        aria-controls="scorecard-body"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {open ? 'Show less' : 'Show the whole scorecard'}
+      </button>
+    </Reveal>
+  )
+}
+
 export function Landing() {
   const apiReady = useApiReady()
 
@@ -142,7 +181,7 @@ export function Landing() {
 
         <Reveal className="lp-phases" aria-labelledby="phases-heading">
           <h2 id="phases-heading">A Session runs in four phases.</h2>
-          <ol className="lp-phase-list">
+          <ol className="lp-phase-list" aria-labelledby="phases-heading">
             {PHASES.map((phase) => (
               <li key={phase.name}>
                 <h3>{phase.name}</h3>
@@ -151,6 +190,8 @@ export function Landing() {
             ))}
           </ol>
         </Reveal>
+
+        <SampleScorecard />
 
         <Reveal className="lp-qualities" aria-labelledby="qualities-heading">
           <h2 id="qualities-heading">Closer to the real thing than a question list.</h2>

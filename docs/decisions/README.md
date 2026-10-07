@@ -52,6 +52,7 @@ index that drifts from the ADRs is worse than no index.
 | [0032](0032-custom-domain-free-subdomain.md) | A readable URL for free — `callback.is-a.dev` over CloudFront | superseded by [0034](0034-registered-domain-over-free-subdomain.md), which was itself **not pursued** — no custom domain |
 | [0033](0033-landing-page-second-entry.md) | The front door is a page, not the app | accepted · extends [0030](0030-callback-rename-and-visual-system.md)'s visual system |
 | [0034](0034-registered-domain-over-free-subdomain.md) | Buy the name with a student benefit, and own the DNS | **not pursued** — the CloudFront URL is the standing choice; phase 1 code is on `main` and inert |
+| [0035](0035-skip-to-the-coding-round.md) | The Candidate can skip to the coding round | accepted · amends [0012](0012-interview-structure-phased-dsa.md)'s fixed phase order |
 
 ## Open — decided direction, not yet closed out
 

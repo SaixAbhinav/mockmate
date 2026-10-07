@@ -114,19 +114,22 @@
 
 /* Shared section shell ------------------------------------------------ */
 
-.landing-page section {
+/* The three shell rules below skip anything inside the sample scorecard: it
+   is the app's own Evaluation card and keeps the app's type. `:where` adds no
+   specificity, so every other landing rule wins or loses exactly as before. */
+.landing-page section:where(:not(.evaluation)) {
   max-width: var(--page);
   margin: 0 auto;
   padding: var(--s10) var(--edge);
   box-sizing: border-box;
 }
 
-.landing-page h2 {
+.landing-page h2:where(:not(.evaluation h2)) {
   font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.125rem);
   max-width: 20ch;
 }
 
-.landing-page p {
+.landing-page p:where(:not(.evaluation p)) {
   color: var(--text-muted);
   max-width: var(--measure);
 }
@@ -233,6 +236,67 @@
   width: var(--s4);
   height: 1px;
   background: var(--border-strong);
+}
+
+/* Sample scorecard ---------------------------------------------------- */
+
+.lp-scorecard > p {
+  margin-top: var(--s5);
+}
+
+.lp-scorecard-frame {
+  margin: var(--s8) 0 0;
+  max-width: 760px;
+}
+
+.lp-scorecard-caption {
+  margin-bottom: var(--s3);
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Folded to the summary by default; a fade says there is more. */
+.lp-scorecard-body {
+  position: relative;
+  max-height: 560px;
+  overflow: hidden;
+}
+
+.lp-scorecard-body::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 160px;
+  background: linear-gradient(to bottom, transparent, var(--bg));
+  pointer-events: none;
+}
+
+.lp-scorecard-frame.is-open .lp-scorecard-body {
+  max-height: none;
+}
+
+.lp-scorecard-frame.is-open .lp-scorecard-body::after {
+  display: none;
+}
+
+.lp-scorecard .evaluation {
+  margin-top: 0;
+}
+
+/* A text link that happens to be a button: undo the global button chrome. */
+.lp-scorecard-toggle {
+  margin-top: var(--s5);
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid var(--border-strong);
+  border-radius: 0;
+  background: transparent;
+}
+
+.lp-scorecard-toggle:hover:not(:disabled) {
+  background: transparent;
 }
 
 /* Qualities grid ------------------------------------------------------ */

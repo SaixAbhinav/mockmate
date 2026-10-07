@@ -3,6 +3,7 @@
 POST /api/session                    -> starts a Session, returns Q1
 POST /api/transcribe   (audio file)  -> {transcript}
 POST /api/session/{id}/answer        -> judges the answer, advances the Session
+POST /api/session/{id}/skip-to-code  -> leaves the spoken rounds for the coding round
 POST /api/session/{id}/dsa/run       -> runs candidate code against test cases
 POST /api/session/{id}/dsa/submit    -> submits code, gets the interviewer's reaction
 POST /api/session/{id}/dsa/snapshot  -> stores the candidate's latest code (no LLM)
@@ -31,6 +32,7 @@ from .agent import (
     record_coding_chat,
     record_interjection,
     set_watch,
+    skip_to_coding,
     start_session,
     submit_answer,
     submit_code,
@@ -147,6 +149,10 @@ class CreateSessionResponse(BaseModel):
 
 class AnswerRequest(BaseModel):
     transcript: str
+    voice: str = DEFAULT_VOICE
+
+
+class SkipToCodeRequest(BaseModel):
     voice: str = DEFAULT_VOICE
 
 
@@ -569,6 +575,36 @@ async def answer(session_id: str, req: AnswerRequest) -> AnswerResponse:
     tts = _stopwatch()
     audio = await synthesize(state["reply"], req.voice)
     _log_turn(session_id, _stage(state), llm_ms, tts())
+    number, total = _progress(state)
+    return AnswerResponse(
+        reply=state["reply"],
+        audio_b64=base64.b64encode(audio).decode(),
+        phase=_external_phase(state),
+        question_number=number,
+        total_questions=total,
+        stage=_stage(state),
+        dsa=_dsa_payload(state),
+    )
+
+
+@app.post("/api/session/{session_id}/skip-to-code", response_model=AnswerResponse)
+async def skip_to_code(session_id: str, req: SkipToCodeRequest) -> AnswerResponse:
+    """Leave the intro/warm-up for the first coding question (ADR 0035).
+
+    No LLM call: the transition line is fixed, so this cannot fail on a
+    Provider. Unreached spoken questions are recorded unanswered, and the
+    Evaluation reports them as skipped."""
+    store = get_store()
+    state = await store.get(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="unknown session")
+    if state["phase"] == "done" or state["current_question"].get("stage") == "dsa":
+        raise HTTPException(status_code=409, detail="the Session is not in a spoken round")
+
+    state = skip_to_coding(state)
+    await store.save(state)
+
+    audio = await synthesize(state["reply"], req.voice)
     number, total = _progress(state)
     return AnswerResponse(
         reply=state["reply"],
