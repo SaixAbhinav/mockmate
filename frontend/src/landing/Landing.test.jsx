@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Landing } from './Landing'
 
@@ -34,8 +35,11 @@ describe('Landing', () => {
   it('names the four phases a Session runs through (ADR 0012)', () => {
     render(<Landing />)
 
+    // Scoped to the phase list: the sample scorecard has its own "Coding round"
+    // heading, the real Evaluation's.
+    const phases = screen.getByRole('list', { name: /four phases/i })
     for (const phase of ['Intro', 'Warm-up', 'Coding round', 'Evaluation']) {
-      expect(screen.getByRole('heading', { name: phase })).toBeInTheDocument()
+      expect(within(phases).getByRole('heading', { name: phase })).toBeInTheDocument()
     }
   })
 
@@ -63,5 +67,25 @@ describe('Landing', () => {
     for (const node of styled) {
       expect(node.getAttribute('style')).not.toMatch(/--(pass|fail|pending)/)
     }
+  })
+
+  it('shows a sample scorecard, labelled as sample data', () => {
+    render(<Landing />)
+
+    const card = screen.getByRole('figure', { name: 'Example scorecard · sample data' })
+    expect(within(card).getByRole('heading', { name: 'How you did' })).toBeInTheDocument()
+    expect(within(card).getByText(/A strong conceptual round/)).toBeInTheDocument()
+    expect(within(card).getByText('tests: 3/5')).toBeInTheDocument()
+  })
+
+  it('folds the scorecard until the visitor asks for all of it', async () => {
+    render(<Landing />)
+
+    const toggle = screen.getByRole('button', { name: 'Show the whole scorecard' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    await userEvent.click(toggle)
+
+    expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true')
   })
 })

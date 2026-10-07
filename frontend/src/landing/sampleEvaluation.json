@@ -1,0 +1,71 @@
+{
+  "session_id": "sample",
+  "domain": "ml_genai",
+  "averages": { "correctness": 4.0, "depth": 3.0, "clarity": 4.5 },
+  "coverage": { "answered": 2, "total": 2 },
+  "assessment": "A strong conceptual round with clear, well-organised answers. Depth dropped on fine-tuning trade-offs, and the bracket-matching solution missed the empty-stack case.",
+  "strengths": [
+    "Explained overfitting with a concrete train-versus-validation example",
+    "Talked through the running_sum approach before writing any code"
+  ],
+  "improvements": [
+    "Compare fine-tuning against prompting or retrieval when the question invites it",
+    "Test the edge cases out loud, such as a closing bracket with nothing to match"
+  ],
+  "questions": [
+    {
+      "question": "What is overfitting, and how would you detect it?",
+      "topic": "bias-variance",
+      "difficulty": "easy",
+      "correctness": 5,
+      "depth": 4,
+      "clarity": 5,
+      "comment": "Accurate and well structured; naming regularisation as the fix would have rounded it off.",
+      "skipped": false,
+      "unscored": false
+    },
+    {
+      "question": "What is the difference between pretraining and fine-tuning a language model?",
+      "topic": "llm-training",
+      "difficulty": "medium",
+      "correctness": 3,
+      "depth": 2,
+      "clarity": 4,
+      "comment": "Got the distinction right but stayed at the surface; mention data scale and catastrophic forgetting.",
+      "skipped": false,
+      "unscored": false
+    }
+  ],
+  "dsa": {
+    "averages": { "code_quality": 3.5, "approach": 3.5 },
+    "hints_used": 1,
+    "questions": [
+      {
+        "question": "Implement running_sum: given a list of integers, return a new list where element i is the sum of the first i plus one input elements.",
+        "topic": "arrays",
+        "difficulty": "easy",
+        "tests": { "status": "ok", "passed": 4, "total": 4 },
+        "code_quality": 4,
+        "approach": 4,
+        "comment": "Clean single pass with a running total; a clear name for the accumulator would help.",
+        "hints": 0,
+        "runs": 2,
+        "skipped": false,
+        "unscored": false
+      },
+      {
+        "question": "Implement is_balanced: given a string containing only round, square, and curly brackets, return True if every bracket is closed by the matching bracket in the correct order.",
+        "topic": "stacks",
+        "difficulty": "medium",
+        "tests": { "status": "ok", "passed": 3, "total": 5 },
+        "code_quality": 3,
+        "approach": 3,
+        "comment": "Right idea with a stack, but popping from an empty stack fails on input that starts with a closing bracket.",
+        "hints": 1,
+        "runs": 4,
+        "skipped": false,
+        "unscored": false
+      }
+    ]
+  }
+}
