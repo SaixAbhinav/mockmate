@@ -157,10 +157,14 @@ Run these in order, from the repo root unless noted:
 
 Two ways to ship a new image, both valid:
 
-- **Rebuild → push → `terraform apply`** (steps 1-4 above again). Pushing
-  `:latest` again changes the image digest, which Terraform detects as a
-  change to `image_uri` and updates the function in place. This is the
-  "normal" path and is what a human runs; PR 4 automates it as CI.
+- **Rebuild → push → `terraform apply`** (steps 1-4 above again). `lambda.tf`
+  looks up the digest `:latest` currently points at (`data.aws_ecr_image`) and
+  pins the function to `repo@sha256:…`, so a new push is a new `image_uri` and
+  `apply` updates the function in place. This is the "normal" path and is what
+  a human runs; PR 4 automates it as CI. (Until 2026-10-07 the function was
+  pinned to the tag itself, `repo:latest` - the same string after every push,
+  so `apply` reported "No changes" and the live backend stayed on the
+  2026-07-30 image while the frontend kept deploying.)
 - **`aws lambda update-function-code`** - faster for an ad-hoc redeploy
   (skips a Terraform run), but drifts Terraform's state (the function's
   running image no longer matches what `plan` thinks is deployed) until the
