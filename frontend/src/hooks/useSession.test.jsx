@@ -248,7 +248,7 @@ describe('useSession', () => {
     await startSession(result)
 
     mocks.respond('/api/session/s1/skip-to-code', {
-      reply: "Sure, let's go straight to the coding round. Implement running_sum.",
+      reply: "Sure, skipping ahead to the coding round. Implement running_sum.",
       phase: 'advancing',
       stage: 'dsa',
       question_number: 4,
@@ -267,7 +267,7 @@ describe('useSession', () => {
     expect(onNewQuestion).toHaveBeenCalledWith(DSA_PAYLOAD)
     expect(result.current.history.at(-1)).toEqual({
       role: 'assistant',
-      content: "Sure, let's go straight to the coding round. Implement running_sum.",
+      content: "Sure, skipping ahead to the coding round. Implement running_sum.",
     })
   })
 

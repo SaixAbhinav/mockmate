@@ -45,7 +45,7 @@ INTRO_QUESTION = {
 
 # Spoken before the first coding question when the Candidate skips ahead
 # (ADR 0035). Fixed, not generated: nothing about it needs a model.
-SKIP_REMARK = "Sure, let's go straight to the coding round."
+SKIP_REMARK = "Sure, skipping ahead to the coding round."
 
 
 class InterviewState(TypedDict):

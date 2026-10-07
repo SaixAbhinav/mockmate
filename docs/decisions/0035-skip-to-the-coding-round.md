@@ -22,7 +22,7 @@ first coding question.
 - **A plain function, not a graph branch.** `agent.skip_to_coding` sits beside
   `submit_code`. A skip is the Candidate's choice, not an answer to judge, so
   the interview graph never runs and no LLM is called. The transition line
-  ("Sure, let's go straight to the coding round.") is fixed text, so the skip
+  ("Sure, skipping ahead to the coding round.") is fixed text, so the skip
   cannot fail on a Provider (0013).
 - **What was said is kept; what was not is skipped.** The current question
   keeps any answers already given and is scored as normal if it had one. Every

@@ -23,7 +23,7 @@ straight to the coding round. Recorded as ADR 0035.
   - The first coding question becomes current; the rest of the coding queue is
     untouched. `follow_up_count`, `current_answers` and `current_answered` reset
     as for any new question.
-  - The reply is `SKIP_REMARK` ("Sure, let's go straight to the coding round.")
+  - The reply is `SKIP_REMARK` ("Sure, skipping ahead to the coding round.")
     joined to the coding question, and it is appended to the transcript as one
     assistant turn. Phase becomes `asking`.
 - `POST /api/session/{id}/skip-to-code`, body `{voice}`, response
@@ -57,13 +57,18 @@ straight to the coding round. Recorded as ADR 0035.
 
 - A section after the phases list, "What you walk away with", showing the real
   `<Evaluation>` component rendered from fixed sample data in
-  `landing/sampleEvaluation.js`, captioned "Example scorecard · sample data".
+  `landing/sampleEvaluation.json`, captioned "Example scorecard · sample data".
 - Sample: an assessment, 2 strengths, 2 improvements, 2 warm-up questions from
-  the ML/GenAI bank with scores, 2 coding questions (6/6 and 4/6 tests passing),
-  1 hint used.
-- The card sits in a framed panel with a capped height and a bottom fade.
+  the ML/GenAI bank with scores, 2 coding questions from the DSA bank (4/4 and
+  3/5 tests passing, matching those questions' real test-case counts), 1 hint
+  used.
+- The card sits in a framed panel folded to a capped height with a bottom fade;
+  a "Show the whole scorecard" toggle (`aria-expanded`) unfolds it.
 - The Evaluation's rules move from `App.css` to `components/Evaluation.css`,
   imported by the component, so the landing page gets them without the app's
   stylesheet. The app's look is unchanged.
-- Tests: the landing page renders the sample scorecard and its caption; the
-  sample has every key `EvaluationResponse` returns.
+- Tests: the landing page renders the sample scorecard and its caption, and the
+  toggle unfolds it; a backend test validates the JSON against
+  `EvaluationResponse` and rejects keys the model does not have.
+- The landing page's shared `section`, `h2` and `p` rules skip the embedded card
+  via `:where(:not(...))`, which adds no specificity.

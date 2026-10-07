@@ -1,4 +1,6 @@
+import json
 import logging
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1027,7 +1029,7 @@ def test_skip_to_code_opens_the_first_coding_question(client):
     assert data["stage"] == "dsa"
     assert data["phase"] == "advancing"
     assert data["dsa"]["function_name"]
-    assert data["reply"].startswith("Sure, let's go straight to the coding round.")
+    assert data["reply"].startswith("Sure, skipping ahead to the coding round.")
     assert data["audio_b64"]
     assert (data["question_number"], data["total_questions"]) == (5, 6)
 
@@ -1071,3 +1073,27 @@ def test_evaluation_after_a_skip_reports_the_warm_up_as_skipped(client):
     assert [q["skipped"] for q in data["questions"]] == [False, True, True]
     assert data["coverage"] == {"answered": 1, "total": 3}
     assert len(data["dsa"]["questions"]) == 2
+
+
+# --- the landing page's sample scorecard ---
+
+SAMPLE_EVALUATION = (
+    Path(__file__).resolve().parents[2] / "frontend" / "src" / "landing" / "sampleEvaluation.json"
+)
+
+
+def test_landing_sample_scorecard_matches_the_evaluation_response():
+    """The landing page renders the real Evaluation component from fixed data.
+    Validating it against the API's own model means a change to the
+    Evaluation's shape fails here instead of leaving a stale sample live."""
+    from app.main import DsaQuestionScore, EvaluationResponse, QuestionScore
+
+    sample = json.loads(SAMPLE_EVALUATION.read_text(encoding="utf-8"))
+
+    EvaluationResponse.model_validate(sample)
+    # model_validate ignores unknown keys; the sample must not invent any.
+    assert set(sample) == set(EvaluationResponse.model_fields)
+    for q in sample["questions"]:
+        assert set(q) <= set(QuestionScore.model_fields)
+    for q in sample["dsa"]["questions"]:
+        assert set(q) <= set(DsaQuestionScore.model_fields)

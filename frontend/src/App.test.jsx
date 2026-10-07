@@ -259,7 +259,7 @@ describe('App', () => {
   })
   describe('Skip to code (ADR 0035)', () => {
     const SKIPPED = {
-      reply: "Sure, let's go straight to the coding round. Implement running_sum.",
+      reply: "Sure, skipping ahead to the coding round. Implement running_sum.",
       phase: 'advancing',
       stage: 'dsa',
       question_number: 4,
