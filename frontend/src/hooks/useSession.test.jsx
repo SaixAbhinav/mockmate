@@ -242,4 +242,49 @@ describe('useSession', () => {
       { role: 'assistant', content: 'Tell me about yourself.' },
     ])
   })
+  it('skips to the coding round and opens the editor through the normal path (ADR 0035)', async () => {
+    mocks.respond('/api/session', START)
+    const { result, onNewQuestion } = setup()
+    await startSession(result)
+
+    mocks.respond('/api/session/s1/skip-to-code', {
+      reply: "Sure, let's go straight to the coding round. Implement running_sum.",
+      phase: 'advancing',
+      stage: 'dsa',
+      question_number: 4,
+      total_questions: 5,
+      dsa: DSA_PAYLOAD,
+      audio_b64: '',
+    })
+    await act(async () => {
+      await result.current.skipToCode()
+    })
+
+    const call = mocks.calls.find((c) => c.path.endsWith('/api/session/s1/skip-to-code'))
+    expect(JSON.parse(call.init.body)).toEqual({ voice: 'v1' })
+    expect(result.current.stage).toBe('dsa')
+    expect(result.current.dsa).toEqual(DSA_PAYLOAD)
+    expect(onNewQuestion).toHaveBeenCalledWith(DSA_PAYLOAD)
+    expect(result.current.history.at(-1)).toEqual({
+      role: 'assistant',
+      content: "Sure, let's go straight to the coding round. Implement running_sum.",
+    })
+  })
+
+  it('reports a failed skip and leaves the transcript alone', async () => {
+    mocks.respond('/api/session', START)
+    const { result, onError } = setup()
+    await startSession(result)
+
+    mocks.respond('/api/session/s1/skip-to-code', {}, false, 409)
+    await act(async () => {
+      await result.current.skipToCode()
+    })
+
+    await waitFor(() => expect(onError).toHaveBeenCalledWith(expect.stringContaining('409')))
+    expect(result.current.stage).toBe('intro')
+    expect(result.current.history).toEqual([
+      { role: 'assistant', content: 'Tell me about yourself.' },
+    ])
+  })
 })

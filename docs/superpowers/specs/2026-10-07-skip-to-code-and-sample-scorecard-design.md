@@ -38,7 +38,8 @@ straight to the coding round. Recorded as ADR 0035.
   the existing `applyProgress`, so the editor opens through the normal path.
 - A `Skip to code →` button in the top bar, rendered only while `stage` is
   `intro` or `warm_up` and the Session is not done. Disabled unless `status` is
-  `idle` or `speaking`.
+  `idle`: `playAudio` does not stop a reply already playing, so skipping
+  mid-speech would overlap two voices.
 - A `window.confirm` guards it: "Skip the remaining warm-up questions? They'll
   show as skipped in your Evaluation." Cancel does nothing.
 

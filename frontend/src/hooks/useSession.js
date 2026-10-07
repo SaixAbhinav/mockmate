@@ -153,6 +153,30 @@ export function useSession({
     }
   }
 
+  // Leave the intro/warm-up for the first coding question (ADR 0035). The reply
+  // carries the dsa payload, so `applyProgress` opens the editor exactly as an
+  // answer that reached the coding round would.
+  async function skipToCode() {
+    if (!sessionId) return
+    setStatus('thinking')
+    onError(null)
+    try {
+      const resp = await fetch(api(`/api/session/${sessionId}/skip-to-code`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice }),
+      })
+      if (!resp.ok) throw new Error(`backend returned ${resp.status}`)
+      const data = await resp.json()
+      setHistory((h) => [...h, { role: 'assistant', content: data.reply }])
+      applyProgress(data)
+      await playAudio(data.audio_b64, setStatus)
+    } catch (err) {
+      onError(String(err))
+      setStatus('idle')
+    }
+  }
+
   return {
     screen,
     sessionId,
@@ -170,6 +194,7 @@ export function useSession({
     startInterview,
     startNewInterview,
     sendTranscript,
+    skipToCode,
     applySubmitProgress,
     appendAssistant,
   }

@@ -43,6 +43,10 @@ INTRO_QUESTION = {
     "stage": "intro",
 }
 
+# Spoken before the first coding question when the Candidate skips ahead
+# (ADR 0035). Fixed, not generated: nothing about it needs a model.
+SKIP_REMARK = "Sure, let's go straight to the coding round."
+
 
 class InterviewState(TypedDict):
     session_id: str
@@ -170,6 +174,50 @@ def record_coding_chat(state: InterviewState, utterance: str, reply: str) -> Int
             {"role": "assistant", "content": reply},
         ],
         "reply": reply,
+    }
+
+
+def skip_to_coding(state: InterviewState) -> InterviewState:
+    """Leave the spoken rounds for the coding round (ADR 0035).
+
+    A plain function like `submit_code`: a skip is the Candidate's choice, not
+    an answer to judge, so the graph never runs and no LLM is called. The
+    current question keeps whatever was really said for it; every question the
+    Candidate never reached is closed out unanswered, which the Evaluation
+    already reports as skipped (ADR 0011).
+    """
+    if state["phase"] == "done" or state["current_question"]["stage"] == "dsa":
+        raise ValueError("the Session is not in a spoken round")
+
+    current = {
+        **state,
+        "current_answered": bool(state["current_answers"]) and state["current_answered"],
+    }
+    completed = _close_out_current_question(current)
+    queue = list(state["queue"])
+    while queue[0]["stage"] != "dsa":
+        unreached = {
+            **state,
+            "completed": completed,
+            "current_question": queue.pop(0),
+            "current_answers": [],
+            "current_answered": False,
+        }
+        completed = _close_out_current_question(unreached)
+
+    nxt = queue.pop(0)
+    reply = _join_reaction(SKIP_REMARK, nxt["question"])
+    return {
+        **state,
+        "completed": completed,
+        "queue": queue,
+        "current_question": nxt,
+        "follow_up_count": 0,
+        "current_answered": True,
+        "current_answers": [],
+        "transcript": [*state["transcript"], {"role": "assistant", "content": reply}],
+        "reply": reply,
+        "phase": "asking",
     }
 
 

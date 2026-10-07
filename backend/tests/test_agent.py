@@ -1,11 +1,13 @@
 import pytest
 
 from app.agent import (
+    SKIP_REMARK,
     _clean_closing,
     _join_reaction,
     build_graph,
     record_coding_chat,
     record_interjection,
+    skip_to_coding,
     start_session,
     submit_answer,
     submit_code,
@@ -495,3 +497,71 @@ def test_bank_fallback_ignores_a_free_form_domain_label():
     assert state["domain"] == "web development"
     warm_ups = [q for q in state["queue"] if q.get("stage") == "warm_up"]
     assert len(warm_ups) == 3
+
+
+async def test_skip_to_coding_makes_the_first_coding_question_current():
+    state = start_session("s1", "ml_genai", seed=1)
+    dsa = [q for q in state["queue"] if q["stage"] == "dsa"]
+
+    state = skip_to_coding(state)
+
+    assert state["current_question"] == dsa[0]
+    assert state["queue"] == dsa[1:]
+    assert state["phase"] == "asking"
+    assert state["follow_up_count"] == 0
+    assert state["current_answers"] == []
+    assert state["current_answered"] is True
+
+
+async def test_skip_to_coding_records_untouched_questions_as_not_answered():
+    state = start_session("s1", "ml_genai", seed=1)
+
+    state = skip_to_coding(state)
+
+    # intro (current, never answered) + 3 queued warm-up questions
+    assert [r["stage"] for r in state["completed"]] == ["intro", "warm_up", "warm_up", "warm_up"]
+    assert all(r["answered"] is False and r["answers"] == [] for r in state["completed"])
+
+
+async def test_skip_to_coding_keeps_a_partly_answered_current_question():
+    provider = FakeProvider([Judgment("advance", "ok", True), Judgment("probe", "Go deeper?", True)])
+    graph = build_graph(provider)
+    state = start_session("s1", "ml_genai", seed=1)
+    state = await submit_answer(graph, state, "about me")  # intro -> warm-up 1
+    state = await submit_answer(graph, state, "a shallow answer")  # probed
+
+    state = skip_to_coding(state)
+
+    warm_up = state["completed"][1]
+    assert warm_up["answered"] is True
+    assert warm_up["answers"] == ["a shallow answer"]
+    assert [r["answered"] for r in state["completed"][2:]] == [False, False]
+
+
+async def test_skip_to_coding_keeps_the_judges_not_answered_verdict():
+    provider = FakeProvider([Judgment("advance", "ok", True), Judgment("clarify", "Did you mean...?", False)])
+    graph = build_graph(provider)
+    state = start_session("s1", "ml_genai", seed=1)
+    state = await submit_answer(graph, state, "about me")
+    state = await submit_answer(graph, state, "off topic")
+
+    state = skip_to_coding(state)
+
+    assert state["completed"][1]["answered"] is False
+
+
+async def test_skip_to_coding_speaks_a_transition_then_the_coding_question():
+    state = start_session("s1", "ml_genai", seed=1)
+
+    state = skip_to_coding(state)
+
+    question = state["current_question"]["question"]
+    assert state["reply"] == f"{SKIP_REMARK} {question}"
+    assert state["transcript"][-1] == {"role": "assistant", "content": state["reply"]}
+
+
+async def test_skip_to_coding_refuses_once_on_a_coding_question():
+    state = _fast_forward_to_dsa(start_session("s1", "ml_genai", seed=1))
+
+    with pytest.raises(ValueError):
+        skip_to_coding(state)

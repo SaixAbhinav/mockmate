@@ -257,4 +257,38 @@ describe('App', () => {
     // Deliberate: the résumé survives, so a second interview needs no re-upload.
     expect(screen.getByText('cv.pdf')).toBeInTheDocument()
   })
+  describe('Skip to code (ADR 0035)', () => {
+    const SKIPPED = {
+      reply: "Sure, let's go straight to the coding round. Implement running_sum.",
+      phase: 'advancing',
+      stage: 'dsa',
+      question_number: 4,
+      total_questions: 5,
+      dsa: DSA_PAYLOAD,
+      audio_b64: '',
+    }
+
+    it('jumps to the coding round after the Candidate confirms', async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+      await startInterview(mocks)
+      mocks.respond('/api/session/s1/skip-to-code', SKIPPED)
+
+      await userEvent.click(screen.getByRole('button', { name: /skip to code/i }))
+
+      expect(window.confirm).toHaveBeenCalled()
+      expect(await screen.findByLabelText('editor')).toHaveValue(DSA_PAYLOAD.starter_code)
+      // Gone once the coding round has started: there is nothing left to skip.
+      expect(screen.queryByRole('button', { name: /skip to code/i })).not.toBeInTheDocument()
+    })
+
+    it('does nothing when the Candidate cancels', async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(false)
+      await startInterview(mocks)
+
+      await userEvent.click(screen.getByRole('button', { name: /skip to code/i }))
+
+      expect(mocks.calls.some((c) => c.path.endsWith('/skip-to-code'))).toBe(false)
+      expect(screen.getByPlaceholderText('Type here')).toBeInTheDocument()
+    })
+  })
 })

@@ -80,6 +80,13 @@ function App() {
     setDraft('')
   }
 
+  // A skip cannot be undone, so it asks first (ADR 0035).
+  function handleSkipToCode() {
+    if (window.confirm("Skip the remaining warm-up questions? They'll show as skipped in your Evaluation.")) {
+      session.skipToCode()
+    }
+  }
+
   function handleNewInterview() {
     session.startNewInterview()
     resetEvaluation()
@@ -124,6 +131,19 @@ function App() {
           {progressLabel && <span className="progress">{progressLabel}</span>}
         </div>
         <div className="controls">
+          {/* Only while there is a spoken round left to leave. Idle only:
+              playAudio does not stop a reply already playing, so skipping
+              mid-speech would talk over it. */}
+          {!done && (stage === 'intro' || stage === 'warm_up') && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={handleSkipToCode}
+              disabled={status !== 'idle'}
+            >
+              Skip to code →
+            </button>
+          )}
           <label className="voice-row">
             Voice:
             <select value={voice} onChange={(e) => setVoice(e.target.value)}>
