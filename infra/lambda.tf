@@ -5,12 +5,23 @@
 # the image must already exist at `image_uri` before `apply` can create the
 # function.
 
+# The digest `image_tag` points at right now. Pinning the function to the
+# digest, not the tag, is what makes a re-pushed `:latest` reach the Lambda:
+# a tag-based `image_uri` is the same string after every push, so `apply`
+# saw "No changes" and the function kept running the image it resolved at
+# its last update (2026-07-30, until this was fixed). A new digest is a new
+# `image_uri`, which `apply` rolls out in place.
+data "aws_ecr_image" "backend" {
+  repository_name = aws_ecr_repository.backend.name
+  image_tag       = var.image_tag
+}
+
 resource "aws_lambda_function" "backend" {
   function_name = "mockmate-backend"
   role          = aws_iam_role.lambda_exec.arn
 
   package_type = "Image"
-  image_uri    = "${aws_ecr_repository.backend.repository_url}:${var.image_tag}"
+  image_uri    = "${aws_ecr_repository.backend.repository_url}@${data.aws_ecr_image.backend.image_digest}"
 
   architectures = ["x86_64"]
   memory_size   = 1024
