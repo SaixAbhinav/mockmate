@@ -1097,3 +1097,32 @@ def test_landing_sample_scorecard_matches_the_evaluation_response():
         assert set(q) <= set(QuestionScore.model_fields)
     for q in sample["dsa"]["questions"]:
         assert set(q) <= set(DsaQuestionScore.model_fields)
+
+
+# --- best-effort speech (ADR 0036) ---
+
+
+def test_a_speech_outage_still_returns_the_reply_as_text(client, monkeypatch):
+    from app import tts
+
+    class BrokenCommunicate:
+        def __init__(self, text, voice):
+            pass
+
+        async def stream(self):
+            raise RuntimeError("403, message='Invalid response status'")
+            yield  # pragma: no cover - makes this an async generator
+
+    monkeypatch.setattr("app.main.synthesize", tts.synthesize)
+    monkeypatch.setattr(tts.edge_tts, "Communicate", BrokenCommunicate)
+
+    start = client.post("/api/session", json={})
+    assert start.status_code == 200
+    assert start.json()["first_question"]
+    assert start.json()["audio_b64"] == ""
+
+    session_id = start.json()["session_id"]
+    turn = client.post(f"/api/session/{session_id}/answer", json={"transcript": "my answer"})
+    assert turn.status_code == 200
+    assert turn.json()["reply"]
+    assert turn.json()["audio_b64"] == ""

@@ -53,6 +53,7 @@ index that drifts from the ADRs is worse than no index.
 | [0033](0033-landing-page-second-entry.md) | The front door is a page, not the app | accepted · extends [0030](0030-callback-rename-and-visual-system.md)'s visual system |
 | [0034](0034-registered-domain-over-free-subdomain.md) | Buy the name with a student benefit, and own the DNS | **not pursued** — the CloudFront URL is the standing choice; phase 1 code is on `main` and inert |
 | [0035](0035-skip-to-the-coding-round.md) | The Candidate can skip to the coding round | accepted · amends [0012](0012-interview-structure-phased-dsa.md)'s fixed phase order |
+| [0036](0036-voice-is-best-effort.md) | The interviewer's voice is best-effort | accepted · amends [0004](0004-voice-stack-browser-stt-edge-tts.md)'s TTS half |
 
 ## Open — decided direction, not yet closed out
 
