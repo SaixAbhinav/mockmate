@@ -685,6 +685,21 @@ async def test_groq_coding_chat_returns_plain_text(fake_groq_client):
     assert reply == "Good question - yes, the list can be empty."
 
 
+@pytest.mark.parametrize("json_mode", [True, False])
+async def test_groq_requests_low_reasoning_effort(fake_groq_client, json_mode):
+    # gpt-oss counts its hidden reasoning against max_tokens; at the default
+    # effort it exhausted the small caps and returned blank or cut-off text,
+    # and a 400 json_validate_failed in JSON mode.
+    fake_groq_client.response = FakeResponse(groq_chat_response("{}"))
+    provider = GroqProvider(api_key="fake-key")
+
+    await provider._chat_json(
+        [{"role": "user", "content": "hi"}], max_tokens=150, json_mode=json_mode
+    )
+
+    assert fake_groq_client.last_request["json"]["reasoning_effort"] == "low"
+
+
 async def test_failover_delegates_coding_chat():
     primary = OneSidedProvider("primary", error=ProviderUnavailableError("429"))
     secondary = OneSidedProvider("secondary")

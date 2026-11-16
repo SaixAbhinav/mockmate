@@ -617,7 +617,17 @@ class GroqProvider:
     async def _chat_json(
         self, messages: list[dict[str, str]], max_tokens: int, json_mode: bool = True
     ) -> str:
-        payload = {"model": self._model, "messages": messages, "max_tokens": max_tokens}
+        # gpt-oss is a reasoning model and its hidden reasoning counts against
+        # max_tokens. At the default effort it spent the small caps below on
+        # reasoning alone: blank or cut-off replies, and a 400
+        # json_validate_failed in JSON mode. Low effort roughly halves the
+        # tokens used, which also eases the free tier's tokens-per-minute cap.
+        payload = {
+            "model": self._model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "reasoning_effort": "low",
+        }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         try:
