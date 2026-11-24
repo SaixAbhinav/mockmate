@@ -31,7 +31,7 @@ index that drifts from the ADRs is worse than no index.
 | [0010](0010-stt-groq-whisper-primary.md) | STT — Groq Whisper primary, browser as no-key fallback | accepted · supersedes STT half of [0004](0004-voice-stack-browser-stt-edge-tts.md) |
 | [0011](0011-evaluator-agent-rubric-scoring.md) | Evaluator agent — batch fan-out rubric scoring | accepted |
 | [0012](0012-interview-structure-phased-dsa.md) | Interview structure — phased session, resume warm-up + DSA | accepted |
-| [0013](0013-provider-failures-malformed-vs-unavailable.md) | Provider failures — malformed vs unavailable | accepted |
+| [0013](0013-provider-failures-malformed-vs-unavailable.md) | Provider failures — malformed vs unavailable | accepted · amended 2026-11-24 (JSON-mode rejections retried, then malformed) |
 | [0014](0014-cross-provider-failover.md) | Cross-provider failover — Groq primary, Gemini fallback | accepted |
 | [0015](0015-resume-grounded-warm-up.md) | Resume-grounded warm-up on a staged question queue | accepted |
 | [0016](0016-dsa-bank-and-sandboxed-runner.md) | DSA part 1 — extended bank + sandboxed runner | accepted |

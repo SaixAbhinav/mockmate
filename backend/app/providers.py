@@ -504,6 +504,19 @@ def _parse_assessment(content: str) -> Assessment:
         raise ProviderMalformedError(f"malformed assessment response: {content!r}") from exc
 
 
+GROQ_JSON_ATTEMPTS = 3
+
+
+def _groq_error_code(resp) -> str | None:
+    """The `error.code` of a Groq error response, or None."""
+    if resp is None or getattr(resp, "status_code", 200) < 400:
+        return None
+    try:
+        return resp.json()["error"]["code"]
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
 class GroqProvider:
     """Groq's OpenAI-compatible endpoint. Free tier.
 
@@ -630,19 +643,38 @@ class GroqProvider:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    self._url,
-                    headers={"Authorization": f"Bearer {self._api_key}"},
-                    json=payload,
-                )
-                resp.raise_for_status()
-                body = resp.json()
-        except httpx.HTTPError as exc:
-            raise ProviderUnavailableError(f"groq request failed: {exc}") from exc
-        except ValueError as exc:  # includes json.JSONDecodeError
-            raise ProviderMalformedError(f"groq returned a non-JSON body: {exc}") from exc
+        # Even at low effort, gpt-oss now and then emits JSON that Groq's JSON
+        # mode rejects with `400 json_validate_failed` (about 1 in 10 judge
+        # calls on the live site). That is a sampling glitch, not an outage, so
+        # it is retried here; if it persists it is malformed output (ADR
+        # 0013): the caller recovers locally instead of failing over.
+        for attempt in range(1, GROQ_JSON_ATTEMPTS + 1):
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(
+                        self._url,
+                        headers={"Authorization": f"Bearer {self._api_key}"},
+                        json=payload,
+                    )
+                    if json_mode and _groq_error_code(resp) == "json_validate_failed":
+                        if attempt < GROQ_JSON_ATTEMPTS:
+                            logger.info("groq json_validate_failed, retrying (%d/%d)", attempt, GROQ_JSON_ATTEMPTS)
+                            continue
+                        raise ProviderMalformedError(
+                            f"groq could not produce valid JSON in {GROQ_JSON_ATTEMPTS} attempts"
+                            " (json_validate_failed)"
+                        )
+                    resp.raise_for_status()
+                    body = resp.json()
+                break
+            except httpx.HTTPError as exc:
+                # Groq's error code says why ("model_not_found", "rate_limit_exceeded").
+                # It carries no key: Groq's key travels in a header, not the URL.
+                code = _groq_error_code(getattr(exc, "response", None))
+                detail = f" ({code})" if code else ""
+                raise ProviderUnavailableError(f"groq request failed: {exc}{detail}") from exc
+            except ValueError as exc:  # includes json.JSONDecodeError
+                raise ProviderMalformedError(f"groq returned a non-JSON body: {exc}") from exc
 
         try:
             return body["choices"][0]["message"]["content"].strip()
