@@ -45,9 +45,12 @@ class FakeResponse:
 
 
 class FakeAsyncClient:
-    """Records the last request and returns a canned response."""
+    """Records the last request and returns a canned response, or the queued
+    `responses` in order when a test sets them."""
 
     last_request = None
+    responses = []
+    calls = 0
 
     def __init__(self, *args, **kwargs):
         pass
@@ -60,18 +63,25 @@ class FakeAsyncClient:
 
     async def post(self, url, **kwargs):
         FakeAsyncClient.last_request = {"url": url, **kwargs}
+        FakeAsyncClient.calls += 1
+        if FakeAsyncClient.responses:
+            return FakeAsyncClient.responses.pop(0)
         return FakeAsyncClient.response
 
 
 @pytest.fixture
 def fake_groq_client(monkeypatch):
     monkeypatch.setattr("app.providers.httpx.AsyncClient", FakeAsyncClient)
+    FakeAsyncClient.responses = []
+    FakeAsyncClient.calls = 0
     return FakeAsyncClient
 
 
 @pytest.fixture
 def fake_gemini_client(monkeypatch):
     monkeypatch.setattr("app.providers.httpx.AsyncClient", FakeAsyncClient)
+    FakeAsyncClient.responses = []
+    FakeAsyncClient.calls = 0
     return FakeAsyncClient
 
 
@@ -166,6 +176,75 @@ async def test_groq_unexpected_response_shape_raises_provider_malformed(fake_gro
     provider = GroqProvider(api_key="fake-key")
     with pytest.raises(ProviderMalformedError):
         await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+
+
+JSON_VALIDATE_FAILED = {
+    "error": {
+        "message": "Failed to validate JSON. Please adjust your prompt.",
+        "type": "invalid_request_error",
+        "code": "json_validate_failed",
+    }
+}
+
+
+async def test_groq_retries_a_json_validate_failure_on_groq(fake_groq_client):
+    # gpt-oss intermittently produces JSON that Groq's JSON mode rejects with a
+    # 400. It is a sampling glitch, so the same call usually succeeds again.
+    fake_groq_client.responses = [
+        FakeResponse(JSON_VALIDATE_FAILED, status_code=400),
+        FakeResponse(groq_chat_response(
+            json.dumps({"classification": "advance", "reply": "Thanks.", "answered": True})
+        )),
+    ]
+    provider = GroqProvider(api_key="fake-key")
+
+    judgment = await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+
+    assert judgment.classification == "advance"
+    assert fake_groq_client.calls == 2
+
+
+async def test_groq_repeated_json_validate_failures_are_malformed_not_unavailable(fake_groq_client):
+    # Groq is up; it just could not produce valid JSON. Calling that
+    # "unavailable" sent the call to Gemini and turned a glitch into a 503.
+    fake_groq_client.response = FakeResponse(JSON_VALIDATE_FAILED, status_code=400)
+    provider = GroqProvider(api_key="fake-key")
+
+    with pytest.raises(ProviderMalformedError):
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+
+    assert fake_groq_client.calls == 3
+
+
+async def test_groq_other_400s_stay_unavailable_and_are_not_retried(fake_groq_client):
+    fake_groq_client.response = FakeResponse(
+        {"error": {"message": "model does not exist", "code": "model_not_found"}}, status_code=400
+    )
+    provider = GroqProvider(api_key="fake-key")
+
+    with pytest.raises(ProviderUnavailableError) as exc_info:
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+
+    assert fake_groq_client.calls == 1
+    assert "model_not_found" in str(exc_info.value)
+
+
+async def test_failover_does_not_send_a_json_validate_glitch_to_gemini(fake_groq_client):
+    fake_groq_client.response = FakeResponse(JSON_VALIDATE_FAILED, status_code=400)
+
+    class Secondary:
+        name = "secondary"
+        called = False
+
+        async def judge_answer(self, **kwargs):
+            Secondary.called = True
+            return Judgment("advance", "ok", True)
+
+    provider = FailoverProvider(GroqProvider(api_key="fake-key"), Secondary())
+
+    with pytest.raises(ProviderMalformedError):
+        await provider.judge_answer(question="Q", follow_up_hints=["h"], history=[], answer="a")
+    assert Secondary.called is False
 
 
 # --- GeminiProvider: the API key rides in the URL, so failures must never echo it ---

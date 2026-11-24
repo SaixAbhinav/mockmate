@@ -57,3 +57,14 @@ Each caller then catches what it actually means:
   `logger.exception` — `GeminiProvider` puts its API key in the request URL, so a
   chained httpx traceback would leak it. Moving that key to an `x-goog-api-key` header
   is a known follow-up.
+
+## Amendment (2026-11-24): a JSON-mode rejection is malformed, after retries
+
+Groq's JSON mode answers `400 json_validate_failed` when the model's own output is not
+valid JSON. On the live site this hit about 1 in 10 judge calls. As an HTTP error it was
+classed *unavailable*, so it failed over to Gemini (out of credits, 402) and the
+Candidate saw a 503. It is neither an outage nor deterministic: the same call usually
+succeeds on a second try. `GroqProvider` now retries it on Groq up to three attempts in
+total, and if it still fails raises **malformed**, so the caller recovers locally (the
+judge advances) instead of failing over. Every other 4xx stays *unavailable*, and its
+Groq error code is now included in the logged message.
